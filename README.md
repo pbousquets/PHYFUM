@@ -1,34 +1,29 @@
-# BEAST
+# PHYFUM
 
-Bayesian Evolutionary Analysis Sampling Trees (BEAST) is a cross-platform program for Bayesian analysis of molecular sequences using MCMC. 
-The program is orientated towards (strict and relaxed) molecular clock analyses. 
-It can be used as a method of constructing phylogenies, but it is also intended for testing evolutionary hypotheses without conditioning on a single tree topology. 
-BEAST uses MCMC to average over tree space, so that each tree is weighted proportional to its posterior probability. 
-It uses an XML input format that allows the user to design and run a large range of models. 
-We also include a program that can convert NEXUS files into this format.
-
-## Download BEAST
-
-[Download BEAST v1.8.3 binaries for Mac, Windows and UNIX/Linux](http://tree.bio.ed.ac.uk/software/beast/)
-
-[Older BEAST Downloads](https://code.google.com/p/beast-mcmc/downloads)
-
-## Other Downloads
-
-[BEASTGen v1.0.2 .tgz file](https://drive.google.com/file/d/0B37cqWL7UhTAVFVhQ2o1Y093b1k)
-
-[BEASTGen v1.0.2 .ZIP file](https://drive.google.com/file/d/0B37cqWL7UhTAWm81VklIeUNtQVU)
-
-# Documentation
-
-[BEAST Documentation Website](http://beast.bio.ed.ac.uk)
+[![PyPI - Version](https://img.shields.io/pypi/v/phyfum.svg)](https://pypi.org/project/phyfum)
+![PyPI - Downloads](https://img.shields.io/pypi/dm/phyfum)
+[![PyPI - Python Version](https://img.shields.io/pypi/pyversions/phyfum.svg)](https://pypi.org/project/phyfum)
+[![GitBook](https://img.shields.io/badge/GitBook-3884FF?logo=gitbook&logoColor=fff)](https://phyfum.gitbook.io/tutorial/)
+[![Docker Image Version](https://img.shields.io/docker/v/pbousquets/phyfum?logo=docker&link=)](https://hub.docker.com/r/pbousquets/phyfum)
+[![Docker Pulls](https://img.shields.io/docker/pulls/pbousquets/phyfum?logo=docker)](https://hub.docker.com/r/pbousquets/phyfum)
 
 
-# Acknowledgements
-- This project is supported in part through the National Science Foundation grant DMS 1264153.
+#### Visit our [GitBook](https://phyfum-1.gitbook.io/tutorial/) for a detailed tutorial of Phyfum
+--- 
 
----
+Phyfum is a tool for inferring phylogenetic trees on methylation-based studies. We harness fluctuating CpG (fCpG) sites of methylation arrays to study the clonal evolution of samples. You can read more about fCpGs in the [original paper](https://www.nature.com/articles/s41587-021-01109-w). 
 
-YourKit is kindly supporting open source projects with its full-featured Java Profiler.
-YourKit, LLC is the creator of innovative and intelligent tools for profiling Java and .NET applications. 
-Take a look at YourKit's leading software products [YourKit Java Profiler](http://www.yourkit.com/java/profiler/index.jsp) and [YourKit .NET Profiler](http://www.yourkit.com/.net/profiler/index.jsp).
+We have implemented a phylogenetic model within [BEAST v.1.8.4] based on the original model described in the paper above. Mind that this repo contains only the BEAST-based program to run the phylogenetic inference. For the full suite of tools and workflow, please refer to the [PHYFUMflow](https://github.com/pbousquets/PHYFUMflow) repo. It covers the IDAT preprocessing, fCpG calling, automatic XML generation, BEAST inference and . Additionally, if both tumor and reference samples are available, CNVs are called to curate non-fluctuating CpGs.
+
+
+## Build
+```
+git clone https://github.com/pbousquets/PHYFUM
+cd PHYFUM
+ant linux
+```
+
+## License
+
+`phyfum` is distributed under the terms of the [CC-BY-NC-SA](LICENSE.txt) license.
+
