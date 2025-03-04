@@ -16,6 +16,8 @@ We have written a workflow based on snakemake to cover the end-to-end analysis. 
 
 Welcome to our end-to-end methylation analysis workflow powered by Snakemake! This guide will walk you through processing raw methylation files to generate phylogenetic trees.
 
+<figure><img src=".gitbook/assets/f1.png" alt=""><figcaption><p>PHYFUM's workflow</p></figcaption></figure>
+
 ### Prerequisites
 
 Ensure you have the following installed:
@@ -31,7 +33,7 @@ Ensure you have the following installed:
 
 You will need:
 
-* Raw methylation files
+* Raw methylation files or beta value CSV file
 * Sample sheet
 
 #### Steps
@@ -41,7 +43,7 @@ You will need:
 3. **CpG Site Calling**: Identify fluctuating CpG sites. If no fCpG site list is provided, the pipeline will generate one.
 4. **Generate XML for BEAST**: Create the XML file required by BEAST for beta-value inputs (_trees mode_).
 5. **Run BEAST**: Execute [`BEAST`](https://beast.community/) for phylogenetic analysis.
-6. QC: mixing and convergence checks.
+6. **QC**: mixing and convergence checks.
 7. **Model Selection**: The pipeline will automatically select the appropriate model.
 8. **Computation of integral solution**. Integrate over each number of stem cell to compute the integrate.&#x20;
 9. **Result Summarization**: Summarize results and draw phylogenetic trees.
@@ -54,8 +56,6 @@ To run the pipeline, execute:
 phyfum run --input exampleBeta.csv --patientinfo metadata.csv --output test  --nchains 2 --stemcells 3-6-1 --workdir test --mle-ps 
 ```
 
-
-
 ### Support
 
 For any issues or questions, please reach out to our support team or check the documentation.
@@ -65,8 +65,6 @@ Enjoy your analysis!
 ***
 
 This tutorial should help you navigate our methylation analysis workflow seamlessly. Happy analyzing!
-
-<figure><img src=".gitbook/assets/f1.png" alt=""><figcaption><p>PHYFUM's workflow</p></figcaption></figure>
 
 
 
