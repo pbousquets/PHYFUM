@@ -206,6 +206,9 @@ def fission_crypt(stateNode, rng=None, fissionmodel='simple'):
         stateOut1 = wrangle_states(stateHyper1, stateDict)
         stateOut2 = wrangle_states(stateHyper2, stateDict)
 
+        if rng.random() < 0.5:
+            stateOut1, stateOut2 = stateOut2, stateOut1
+
     elif fissionmodel == 'bud':
         # Calculate S from the number of states, given there are
         # (S+1)(S+2)/2 states
@@ -234,6 +237,9 @@ def fission_crypt(stateNode, rng=None, fissionmodel='simple'):
         # Wrangle the outputted daughter crypts back into the 2d state format
         stateOut1 = wrangle_states(stateHyper1, stateDict)
         stateOut2 = wrangle_states(stateHyper2, stateDict)
+
+        if rng.random() < 0.5:
+            stateOut1, stateOut2 = stateOut2, stateOut1
 
     else:
         raise ValueError("fissionmodel must be: 'simple', 'double', 'hyper' or 'bud")
@@ -299,8 +305,88 @@ def all_parents(tree):
             parents[child] = clade
     return parents
 
+def evolve_branch_with_fission(
+    RateMatrix,
+    state,
+    branch_length,
+    rng,
+    fission_rate=0.0,
+    fissionmodel="simple",
+):
+    """
+    Evolve `state` along a branch of length `branch_length`, with an
+    exponential waiting-time process for crypt fission at rate `fission_rate`.
 
-def simulate_beta(tree, S, lam, mu, gamma, delta, eta, kappa, N, fissionmodel = 'simple'):
+    At each fission, apply `fission_crypt` and randomly keep one daughter.
+    """
+    if branch_length is None:
+        branch_length = 0.0
+
+    if (branch_length <= 0
+        or fission_rate is None
+        or fission_rate <= 0
+        or fissionmodel == "simple"):
+        # No internal fissions; just evolve once along the whole branch
+        return evolve_state(RateMatrix, state, branch_length, rng)
+
+    t = 0.0
+    current_state = state
+
+    while True:
+        # Time to next fission ~ Exp(fission_rate)
+        wait_time = rng.exponential(1.0 / fission_rate)
+
+        if t + wait_time >= branch_length:
+            # No more fissions before the end of the branch
+            dt = branch_length - t
+            if dt > 0:
+                current_state = evolve_state(RateMatrix, current_state, dt, rng)
+            break
+
+        # Evolve to the fission time
+        current_state = evolve_state(RateMatrix, current_state, wait_time, rng)
+
+        # Fission, keep one daughter at random
+        current_state, _ = fission_crypt(current_state, rng, fissionmodel)
+
+        t += wait_time
+
+    return current_state
+
+
+def simulate_beta(
+    tree,
+    S,
+    lam,
+    mu,
+    gamma,
+    delta,
+    eta,
+    kappa,
+    N,
+    fissionmodel="simple",
+    fission_rate=0.0,
+):
+    """
+    Simulate fCpG beta values on a tree.
+
+    Parameters
+    ----------
+    tree : Bio.Phylo tree
+    S : int
+        Stem cell population size per crypt.
+    lam, mu, gamma : float
+        Epigenetic switching parameters (as before).
+    delta, eta, kappa : float
+        Observation/noise parameters (as before).
+    N : int
+        Number of CpG loci.
+    fissionmodel : {'simple','double','hyper','bud'}
+        Model for how stem cells are partitioned at each crypt fission.
+    fission_rate : float
+        Rate of crypt fission along branches (per unit branch length).
+        If 0, reduces to the previous behaviour (fissions only at nodes).
+    """
     rng = np.random.default_rng()
 
     stateVar = generate_state_var(S)
@@ -311,6 +397,14 @@ def simulate_beta(tree, S, lam, mu, gamma, delta, eta, kappa, N, fissionmodel = 
 
     stateInit = multinomial_rvs(1, initialConditions, rng)
     tree.root.fcpgs = evolve_state(RateMatrix, stateInit, tree.root.branch_length, rng)
+    tree.root.fcpgs = evolve_branch_with_fission(
+        RateMatrix,
+        stateInit,
+        tree.root.branch_length,
+        rng,
+        fission_rate=fission_rate,
+        fissionmodel=fissionmodel,
+    )
     tree.root.daughter1, tree.root.daughter2 = fission_crypt(tree.root.fcpgs, rng, fissionmodel)
 
     n = 0
@@ -327,11 +421,26 @@ def simulate_beta(tree, S, lam, mu, gamma, delta, eta, kappa, N, fissionmodel = 
             # Find the parent clade
             parent_clade = parent_dict[clade]
 
-            state = parent_clade.daughter1 if parent_clade in traversed_clades else parent_clade.daughter2
+            # Choose which daughter state this branch descends from
+            state = (
+                parent_clade.daughter1
+                if parent_clade in traversed_clades
+                else parent_clade.daughter2
+            )
 
-            clade.fcpgs = evolve_state(RateMatrix, state, clade.branch_length, rng)
+            # Evolve along the branch (potentially with internal fissions)
+            clade.fcpgs = evolve_branch_with_fission(
+                RateMatrix,
+                state,
+                clade.branch_length,
+                rng,
+                fission_rate=fission_rate,
+                fissionmodel=fissionmodel,
+            )
             clade.beta = convert_state_beta(clade.fcpgs, S, stateVar)
             clade.betaNoisy = add_noise(clade.beta, delta, eta, kappa)
+
+            # Node fission at this clade to seed its children
             clade.daughter1, clade.daughter2 = fission_crypt(clade.fcpgs, rng, fissionmodel)
 
             traversed_clades.append(parent_clade)
@@ -355,7 +464,28 @@ def range_to_numeric_callback(ctx, param, value):
     return value
 
 
-def simulate_fcpgs(N, S, lam, mu, gamma, delta, eta, kappa, random_tree, tree_file, seed, samples, eff_pop_size, time, root_limits, directory, fissionmodel, output, no_tree):
+def simulate_fcpgs(
+    N,
+    S,
+    lam,
+    mu,
+    gamma,
+    delta,
+    eta,
+    kappa,
+    random_tree,
+    tree_file,
+    seed,
+    samples,
+    eff_pop_size,
+    time,
+    root_limits,
+    directory,
+    fissionmodel,
+    fission_rate,
+    output,
+    no_tree,
+):
     np.random.seed(seed)
 
     arguments = locals()  # Get current variables as a dictionary
@@ -402,7 +532,19 @@ def simulate_fcpgs(N, S, lam, mu, gamma, delta, eta, kappa, random_tree, tree_fi
             export_pdf.savefig()
             plt.close()
 
-    tree = simulate_beta(tree, S, lam, mu, gamma, delta, eta, kappa, N, fissionmodel)
+    tree = simulate_beta(
+        tree,
+        S,
+        lam,
+        mu,
+        gamma,
+        delta,
+        eta,
+        kappa,
+        N,
+        fissionmodel,
+        fission_rate=fission_rate,
+    )
 
     df = pd.DataFrame({})
 
@@ -440,6 +582,7 @@ def simulate_fcpgs(N, S, lam, mu, gamma, delta, eta, kappa, random_tree, tree_fi
 @click.option("--delta", default=0.05, help="Fixed delta parameter value", type=float, cls=CustomOption, help_group="Model parameters")
 @click.option("--eta", default=0.93, help="Fixed eta parameter value", type=float, cls=CustomOption, help_group="Model parameters")
 @click.option("--kappa", default=100, help="Fixed kappa parameter value", type=float, cls=CustomOption, help_group="Model parameters")
+@click.option( "--fission_rate", default=0.0, help="Crypt fission rate per unit branch length", type=float, cls=CustomOption, help_group="Model parameters")
 @click.option("--rlam", help="Randomly choose a fixed lambda parameter value (min,max)", type=str, callback=range_to_numeric_callback, cls=CustomOption, help_group="Random parameters")
 @click.option("--rmu", help="Randomly choose a fixed mu parameter value (min,max)", type=str, callback=range_to_numeric_callback, cls=CustomOption, help_group="Random parameters")
 @click.option("--metbias", help="Randomly choose a mu/gamma ratio (min,max)", type=str, callback=range_to_numeric_callback, cls=CustomOption, help_group="Random parameters")
@@ -457,7 +600,7 @@ def simulate_fcpgs(N, S, lam, mu, gamma, delta, eta, kappa, random_tree, tree_fi
 @click.option("--fissionmodel", default="simple", help="Fission model to use on when a branch divides (simple, double, ring)", type=str, cls=CustomOption, help_group="Other")
 @click.option("--output", required=False, help="Prefix that output files will carry", type=str, cls=CustomOption, help_group="Other")
 @click.option("--no_tree", default=False, help="Whether to avoid plotting the phylogenetic tree", is_flag=True, cls=CustomOption, help_group="Other")
-def main(N, S, lam, mu, gamma, delta, eta, kappa, rlam, rmu, metbias, rdelta, reta, rkappa, random_tree, tree_file, seed, samples, eff_pop_size, time, root_limits, directory, fissionmodel, output, no_tree):
+def main(N, S, lam, mu, gamma, delta, eta, kappa, rlam, rmu, metbias, rdelta, reta, rkappa, random_tree, tree_file, seed, samples, eff_pop_size, time, root_limits, directory, fissionmodel, fission_rate, output, no_tree):
     lam = rlam if rlam else lam
     mu = rmu if rmu else mu
     delta = rdelta if rdelta else delta
@@ -466,10 +609,15 @@ def main(N, S, lam, mu, gamma, delta, eta, kappa, rlam, rmu, metbias, rdelta, re
     eta = reta if reta else eta
     if fissionmodel not in ['simple', 'double', 'hyper', 'bud']:
         raise ValueError("fissionmodel must be: 'simple', 'double', 'hyper' or 'bud")
+    
+    if fission_rate < 0:
+        raise click.BadParameter("fission_rate must be non-negative")
 
     output = output if output else f"{S}_{lam}_{mu}_{gamma}_{kappa}_{samples}"
     seed = seed if seed else get_random_seed()
-    simulate_fcpgs(N, S, lam, mu, gamma, delta, eta, kappa, random_tree, tree_file, seed, samples, eff_pop_size, time, root_limits, directory, fissionmodel, output, no_tree)
+    simulate_fcpgs(N, S, lam, mu, gamma, delta, eta, kappa, random_tree,
+                    tree_file, seed, samples, eff_pop_size, time, root_limits,
+                    directory, fissionmodel, fission_rate, output, no_tree)
 
 
 if __name__ == "__main__":
