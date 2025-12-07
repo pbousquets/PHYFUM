@@ -38,6 +38,8 @@ import dr.xml.*;
 import dr.evomodel.branchratemodel.CenancestorBranchRateModel;
 import dr.evomodel.treelikelihood.CenancestorTreeLikelihood;
 
+import java.util.Arrays;
+import java.util.HashSet;
 import java.util.Set;
 import java.util.logging.Logger;
 
@@ -104,7 +106,7 @@ public class CenancestorTreeLikelihoodParser extends AbstractXMLObjectParser {
         String division_model = "default";
         if (xo.hasAttribute(DIVISION_MODEL)) {
             division_model = (String) xo.getAttribute(DIVISION_MODEL);
-            Set<String> allowed = Set.of(CLONING,BUDDING);
+            Set<String> allowed = new HashSet<>(Arrays.asList(CLONING, BUDDING));
 
             if (!allowed.contains(division_model)) {
                 Logger.getLogger("dr.evolution").info("\nWARNING: cenancestorTreeLikelihood division model " +
