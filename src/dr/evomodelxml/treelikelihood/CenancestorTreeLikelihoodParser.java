@@ -38,6 +38,9 @@ import dr.xml.*;
 import dr.evomodel.branchratemodel.CenancestorBranchRateModel;
 import dr.evomodel.treelikelihood.CenancestorTreeLikelihood;
 
+import java.util.Set;
+import java.util.logging.Logger;
+
 /**
  */
 public class CenancestorTreeLikelihoodParser extends AbstractXMLObjectParser {
@@ -54,6 +57,10 @@ public class CenancestorTreeLikelihoodParser extends AbstractXMLObjectParser {
     public static final String CENANCESTOR_HEIGHT = "cenancestorHeight";
     public static final String CENANCESTOR_BRANCH = "cenancestorBranch";
     public static final String HEIGHT_RULES = "heightRules";
+    public static final String DIVISION_MODEL = "divisionModel";
+    //Division models
+    public static final String CLONING = "cloning";
+    public static final String BUDDING = "budding";
 
     public String getParserName() {
         return TREE_LIKELIHOOD;
@@ -80,7 +87,7 @@ public class CenancestorTreeLikelihoodParser extends AbstractXMLObjectParser {
 
         Parameter cenancestor = (Parameter) xo.getElementFirstChild(CENANCESTOR_HEIGHT);
 
-        Parameter cenancestorBranch= (Parameter) xo.getElementFirstChild(CENANCESTOR_BRANCH);
+        Parameter cenancestorBranch = (Parameter) xo.getElementFirstChild(CENANCESTOR_BRANCH);
 
         //Parameter AsStatistic=(Parameter) xo.getChild(USE_AS_STATISTIC);
 
@@ -94,6 +101,19 @@ public class CenancestorTreeLikelihoodParser extends AbstractXMLObjectParser {
 
         boolean forceRescaling = xo.getAttribute(FORCE_RESCALING, false);
 
+        String division_model = "default";
+        if (xo.hasAttribute(DIVISION_MODEL)) {
+            division_model = (String) xo.getAttribute(DIVISION_MODEL);
+            Set<String> allowed = Set.of(CLONING,BUDDING);
+
+            if (!allowed.contains(division_model)) {
+                Logger.getLogger("dr.evolution").info("\nWARNING: cenancestorTreeLikelihood division model " +
+                        division_model +
+                        " was not recognized, using the default model");
+                division_model = "default";
+            }
+        }
+
         return new CenancestorTreeLikelihood(
                 patternList,
                 treeModel,
@@ -103,6 +123,7 @@ public class CenancestorTreeLikelihoodParser extends AbstractXMLObjectParser {
                 cenancestor,
                 cenancestorBranch,
                 cenancestorFrequencyModel,
+                division_model,
                 //AsStatistic,
                 useAmbiguities, allowMissingTaxa, storePartials, forceJavaCore, forceRescaling,
                 heightRules);
@@ -124,13 +145,13 @@ public class CenancestorTreeLikelihoodParser extends AbstractXMLObjectParser {
         return rules;
     }
 
-    private final XMLSyntaxRule[] rules = {
+    private final XMLSyntaxRule[] rules = new XMLSyntaxRule[]{
             AttributeRule.newBooleanRule(USE_AMBIGUITIES, true),
             AttributeRule.newBooleanRule(ALLOW_MISSING_TAXA, true),
             AttributeRule.newBooleanRule(STORE_PARTIALS, true),
             AttributeRule.newBooleanRule(FORCE_JAVA_CORE, true),
             AttributeRule.newBooleanRule(FORCE_RESCALING, true),
-            AttributeRule.newBooleanRule(HEIGHT_RULES,true),
+            AttributeRule.newBooleanRule(HEIGHT_RULES, true),
             new ElementRule(PatternList.class),
             new ElementRule(TreeModel.class),
             new ElementRule(SiteModel.class),
@@ -138,9 +159,10 @@ public class CenancestorTreeLikelihoodParser extends AbstractXMLObjectParser {
             new ElementRule(TipStatesModel.class, true),
             new ElementRule(FrequencyModel.class, true),
             new ElementRule(CENANCESTOR_HEIGHT,
-                    new XMLSyntaxRule[]{new ElementRule(Parameter.class)},true),
+                    new XMLSyntaxRule[]{new ElementRule(Parameter.class)}, true),
             new ElementRule(CENANCESTOR_BRANCH,
-                    new XMLSyntaxRule[]{new ElementRule(Parameter.class)},true),
+                    new XMLSyntaxRule[]{new ElementRule(Parameter.class)}, true),
+            new StringAttributeRule(DIVISION_MODEL, "Crypt division model", new String[]{CLONING,BUDDING}, true),
             //new ElementRule(USE_AS_STATISTIC,
             //new XMLSyntaxRule[]{new ElementRule(Parameter.class)},true),
     };

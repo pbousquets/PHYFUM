@@ -76,6 +76,7 @@ public class CenancestorTreeLikelihood extends AbstractTreeLikelihood {
                                      Parameter cenancestorHeight,
                                      Parameter cenancestorBranch,
                                      AbstractGeneralFrequencyModel cenancestorFrequencyModel,
+                                     String divisionModel,
                                      // Parameter asStatistic,
                                      boolean useAmbiguities,
                                      boolean allowMissingTaxa,
@@ -188,8 +189,16 @@ public class CenancestorTreeLikelihood extends AbstractTreeLikelihood {
                 coreName = "Java cenancestor CNV";
                 cenancestorlikelihoodCore = new GeneralCenancestorLikelihoodCore(patternList.getStateCount());
             } else if (dataType instanceof dr.evolution.datatype.AFsequence) {
-                coreName = "Java cenancestor FlipFlop";
-                cenancestorlikelihoodCore = new GeneralCenancestorLikelihoodCore(patternList.getStateCount());
+                switch(divisionModel) {
+                    case CenancestorTreeLikelihoodParser.BUDDING:
+                        coreName = "Java cenancestor FlipFlop with budding";
+                        cenancestorlikelihoodCore = new BuddingCenancestorLikelihoodCore(patternList.getStateCount());
+                        break;
+                    default:
+                        coreName = "Java cenancestor FlipFlop";
+                        cenancestorlikelihoodCore = new GeneralCenancestorLikelihoodCore(patternList.getStateCount());
+
+                }
             } else {
                 throw new RuntimeException("Cenancestor tree likelihood for dataType "+this.dataType.getName()+" not implemented");
             }
