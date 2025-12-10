@@ -80,24 +80,54 @@ def generate_rate_matrix(S, lam, mu, gamma, stateVar=None):
     if stateVar is None:
         stateVar = generate_state_var(S)
 
-    RateMatrix = np.zeros((len(stateVar), len(stateVar)))
+    # Special case: S = 1 has 3-state CTMC (0, 0.5, 1)
+    if S == 1:
+        if len(stateVar) != 3:
+            raise ValueError(
+                f"For S=1, stateVar should have 3 states, got {len(stateVar)}"
+            )
 
-    for down, (k_down, m_down) in enumerate(stateVar):
-        for across, (k, m) in enumerate(stateVar):
-            if k == k_down - 1 and m == m_down:
-                RateMatrix[down, across] = (S - m - k) * (k * lam / (S - 1) + 2 * mu)
-            elif k == k_down and m == m_down - 1:
-                RateMatrix[down, across] = m * (S - m - k) * lam / (S - 1)
-            elif k == k_down + 1 and m == m_down - 1:
-                RateMatrix[down, across] = k * (m * lam / (S - 1) + mu)
-            elif k == k_down + 1 and m == m_down:
-                RateMatrix[down, across] = k * ((S - m - k) * lam / (S - 1) + gamma)
-            elif k == k_down and m == m_down + 1:
-                RateMatrix[down, across] = m * (S - m - k) * lam / (S - 1)
-            elif k == k_down - 1 and m == m_down + 1:
-                RateMatrix[down, across] = m * (k * lam / (S - 1) + 2 * gamma)
-            elif k == k_down and m == m_down:
-                RateMatrix[down, across] = -(2 * ((k + m) * (S - m - k) + k * m) * lam / (S - 1) + (k + 2 * m) * gamma + (2 * S - (k + 2 * m)) * mu)
+        RateMatrix = np.zeros((len(stateVar), len(stateVar)))
+
+        # Identify indices for (0,0), (1,0), (0,1)
+        idx_00 = stateVar.index((0, 0))  # beta = 0
+        idx_10 = stateVar.index((1, 0))  # beta = 0.5
+        idx_01 = stateVar.index((0, 1))  # beta = 1
+
+        # Convention: column = "from" state, row = "to" state
+        # 0 -> 0.5 at rate 2*mu
+        RateMatrix[idx_10, idx_00] = 2 * mu            # off-diagonal
+        RateMatrix[idx_00, idx_00] = -2 * mu           # diagonal = -sum(out)
+
+        # 1 -> 0.5 at rate 2*gamma
+        RateMatrix[idx_10, idx_01] = 2 * gamma
+        RateMatrix[idx_01, idx_01] = -2 * gamma
+
+        # 0.5 -> 0 at rate gamma; 0.5 -> 1 at rate mu
+        RateMatrix[idx_00, idx_10] = gamma
+        RateMatrix[idx_01, idx_10] = mu
+        RateMatrix[idx_10, idx_10] = -(mu + gamma)
+
+    else:
+        RateMatrix = np.zeros((len(stateVar), len(stateVar)))
+
+        for down, (k_down, m_down) in enumerate(stateVar):
+            for across, (k, m) in enumerate(stateVar):
+                if k == k_down - 1 and m == m_down:
+                    RateMatrix[down, across] = (S - m - k) * (k * lam / (S - 1) + 2 * mu)
+                elif k == k_down and m == m_down - 1:
+                    RateMatrix[down, across] = m * (S - m - k) * lam / (S - 1)
+                elif k == k_down + 1 and m == m_down - 1:
+                    RateMatrix[down, across] = k * (m * lam / (S - 1) + mu)
+                elif k == k_down + 1 and m == m_down:
+                    RateMatrix[down, across] = k * ((S - m - k) * lam / (S - 1) + gamma)
+                elif k == k_down and m == m_down + 1:
+                    RateMatrix[down, across] = m * (S - m - k) * lam / (S - 1)
+                elif k == k_down - 1 and m == m_down + 1:
+                    RateMatrix[down, across] = m * (k * lam / (S - 1) + 2 * gamma)
+                elif k == k_down and m == m_down:
+                    RateMatrix[down, across] = -(2 * ((k + m) * (S - m - k) + k * m) * lam / (S - 1) 
+                                                 + (k + 2 * m) * gamma + (2 * S - (k + 2 * m)) * mu)
 
     return RateMatrix
 
