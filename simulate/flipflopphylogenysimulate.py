@@ -229,10 +229,9 @@ def fission_crypt(stateNode, rng=None, fissionmodel='simple'):
 
             interHyper1 = rng.multivariate_hypergeometric(counts, 
                                         1, method='count')
-            interHyper2 = counts - interHyper1
 
             stateHyper1[:, i] = S * interHyper1
-            stateHyper2[:, i] = interHyper2 + multinomial_rvs(1, interHyper2, rng)
+            stateHyper2[:, i] = counts
 
         # Wrangle the outputted daughter crypts back into the 2d state format
         stateOut1 = wrangle_states(stateHyper1, stateDict)
