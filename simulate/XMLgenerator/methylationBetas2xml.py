@@ -45,6 +45,9 @@ class CustomCommand(click.Command):
 @click.option("--mu", cls=CustomOption, default=0.1, help="Prior for the mu parameter", type=float, help_group="Priors")
 @click.option("--gamma", cls=CustomOption, default=0.1, help="Prior for the gamma parameter", type=float, help_group="Priors")
 @click.option("--lambda", "Lambda", cls=CustomOption, default=1, help="Prior for the lambda parameter", type=float, help_group="Priors")
+@click.option("--four-rates", cls=CustomOption, is_flag=True, help="Estimate four independent methylation/demethylation rates (mu, nu, gamma, zeta), plus lambda. Default: nu=mu and zeta=gamma remain tied.", help_group="Substitution model")
+@click.option("--nu", cls=CustomOption, default=None, type=click.FloatRange(min=0), help="Initial nu value for --four-rates; defaults to the initial mu value.", help_group="Substitution model")
+@click.option("--zeta", cls=CustomOption, default=None, type=click.FloatRange(min=0), help="Initial zeta value for --four-rates; defaults to the initial gamma value.", help_group="Substitution model")
 @click.option("--popSize", "popSize", cls=CustomOption, default=1, help="Prior for constant population size", type=float, help_group="Priors")
 @click.option("--mle", cls=CustomOption, default=False, help="Whether MLE estimation is used", is_flag=True, help_group="MLE estimation module")
 @click.option("--mle-steps", "mle_steps", cls=CustomOption, default=100, help="Number of power posteriors to use for MLE", type=click.INT, help_group="MLE estimation module")
@@ -98,7 +101,12 @@ def main(
     mle_ps: bool = False,
     mle_ss: bool = False,
     hme: bool = False,
+    four_rates: bool = False,
+    nu: float = None,
+    zeta: float = None,
 ) -> None:
+    if not four_rates and (nu is not None or zeta is not None):
+        raise click.UsageError("--nu and --zeta require --four-rates.")
     myobj = readMethylation(input, precision, stripRownames)
     myobj.parseSamples()
 
@@ -109,7 +117,7 @@ def main(
         mle_iterations = ceil(iterations // mle_steps) if mle_iterations is None else mle_iterations
         mle_sampling = floor(mle_iterations // 1000) if mle_sampling is None else mle_sampling
 
-    XMLfile = createXML(age=age, stemCells=stemCells, delta=delta, eta=eta, kappa=kappa, mu=mu, gamma=gamma, Lambda=Lambda, popSize = popSize)
+    XMLfile = createXML(age=age, stemCells=stemCells, delta=delta, eta=eta, kappa=kappa, mu=mu, gamma=gamma, Lambda=Lambda, popSize = popSize, four_rates=four_rates, nu=nu, zeta=zeta)
     XMLfile.addSamples(myobj)
     XMLfile.buildDoc(output, iterations=iterations, sampling=sampling, screenSampling=screenSampling, mle=mle, mle_ss=mle_ss, mle_ps=mle_ps, hme=hme, mle_iterations=mle_iterations, mle_sampling=mle_sampling)
     XMLfile.printDocument(output)

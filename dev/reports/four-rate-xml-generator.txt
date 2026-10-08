@@ -1,0 +1,67 @@
+Four-rate XML generator and example
+Date: 2026-10-08
+Branch: four-rate-params_AI
+
+Usage (from PHYFUM)
+-------------------
+  python simulate/XMLgenerator/methylationBetas2xml.py \
+    --input samples.csv --age 45 --four-rates --output analysisFourRates
+
+Optional --nu and --zeta set their initial values, for example:
+  python simulate/XMLgenerator/methylationBetas2xml.py \
+    --input samples.csv --age 45 --four-rates --nu 0.04 --zeta 0.08 \
+    --output analysisFourRates
+
+The four rates are mu, nu, gamma, and zeta; lambda remains the independent
+cell-replacement rate. Without --four-rates, the generator retains its original
+output and PHYFUM ties nu to mu and zeta to gamma. In four-rate mode, unspecified
+nu/zeta initial values are copied from mu/gamma, but distinct XML parameters
+allow their subsequent estimates to differ. --nu/--zeta require --four-rates.
+The Python API offers four_rates=True with optional nu and zeta arguments.
+
+Sampling configuration
+----------------------
+Nu uses mu as its template; zeta uses gamma. Both reference rates currently use:
+  - Nonnegative parameter bounds.
+  - Independent scaleOperator: scaleFactor=0.9, weight=0.5.
+  - halfNormalPrior: mean=0.0, stdev=0.05.
+The new rates also enter the existing upDownOperator's up group alongside
+mu, gamma, and lambda, preserving joint scaling of all rates against tree time.
+Both are included in the parameter log. Existing MLE configurations use the
+same expanded prior, so the new rates have proper priors there as well.
+
+Example
+-------
+examples/release/flipflop/sim1AbsoluteFourRates.xml is derived from
+sim1Absolute.xml with these equivalent additions. It preserves the original
+data, initial parameter values, chain length, and other model settings, and
+uses sim1AbsoluteFourRates.ops/.log/.trees for its outputs. The original
+sim1Absolute.xml remains unchanged.
+
+Validation
+----------
+Installed the generator's existing dependencies (click, pandas, yattag) in
+the temporary environment /private/tmp/phyfum-xml-check.tyuVOj/venv.
+
+  /private/tmp/phyfum-xml-check.tyuVOj/venv/bin/python -m unittest discover \
+    -s simulate/XMLgenerator -p 'test_*.py' -v
+
+All four tests passed. Coverage includes original-mode omissions, default
+and overridden initial rates, independent parameter declarations, matching
+operators/priors, joint rate scaling, log entries, reference integrity, CLI
+mode validation, and preservation of the original example after accounting
+for the intended additions and output-prefix changes.
+
+Compared default generator output with the pre-change implementation from
+Git: byte-for-byte identical for the same inputs.
+
+Completed two 150-step BEAST smoke runs with -beagle_off -seed 12345:
+  - CLI-generated XML using test.csv, nu=0.04 and zeta=0.08.
+  - A temporary copy of sim1AbsoluteFourRates.xml with chain length 150
+    and log interval 25 (the committed example retains 750000 and 75).
+Both reached state 150 with finite posterior/prior/likelihood values. Their
+operator reports include nu, zeta, and the expanded joint scaling operator.
+These are execution checks, not convergence assessments. Temporary XMLs and
+run outputs are under /private/tmp/phyfum-xml-check.tyuVOj/.
+
+git diff --check passed. Only PHYFUM was modified; nothing was pushed.

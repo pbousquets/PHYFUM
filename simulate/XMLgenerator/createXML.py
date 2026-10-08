@@ -12,7 +12,9 @@ class createXML:
     This class builds the actual XML file
     """
 
-    def __init__(self, age: float, stemCells: int = 3, delta: float = 0.2, eta: float = 0.7, kappa: float = 50, mu: float = 0.1, gamma: float = 0.1, Lambda: float = 1, popSize = 1, normalize=False) -> None:
+    def __init__(self, age: float, stemCells: int = 3, delta: float = 0.2, eta: float = 0.7, kappa: float = 50, mu: float = 0.1, gamma: float = 0.1, Lambda: float = 1, popSize = 1, normalize=False, four_rates: bool = False, nu: float = None, zeta: float = None) -> None:
+        if not four_rates and (nu is not None or zeta is not None):
+            raise ValueError("nu and zeta require four_rates=True")
         self.age = age
         self.lucaBranch = 1 if age > 1 else age * 0.1
         self.stemCells = stemCells
@@ -21,6 +23,12 @@ class createXML:
         self.kappa = kappa
         self.mu = mu
         self.gamma = gamma
+        # Start the new rates at their original equivalents, but emit independent parameters.
+        # An empty mapping preserves the original XML and its parser-level rate ties.
+        self.extraRates = {}
+        if four_rates:
+            self.extraRates = {"nu": mu if nu is None else nu,
+                               "zeta": gamma if zeta is None else zeta}
         self.Lambda = Lambda
         self.popSize = popSize
         self.normalize = "true" if normalize else "false"
@@ -118,6 +126,9 @@ class createXML:
                     self.doc.stag("parameter", id="flipflop.gamma", value=self.gamma, lower="0.0")
                 with self.tag("lambda"):
                     self.doc.stag("parameter", id="flipflop.lambda", value=self.Lambda, lower="0.0")
+                for rate, value in self.extraRates.items():
+                    with self.tag(rate):
+                        self.doc.stag("parameter", id=f"flipflop.{rate}", value=value, lower="0.0")
 
             self.newSection("The site model")
             with self.tag("siteModel", id="siteModel"):
@@ -163,6 +174,10 @@ class createXML:
                     self.doc.stag("parameter", idref="flipflop.gamma")
                 with self.tag("scaleOperator", scaleFactor="0.9", weight="0.5"):
                     self.doc.stag("parameter", idref="flipflop.lambda")
+                # Nu follows mu and zeta follows gamma; both use these scale settings.
+                for rate in self.extraRates:
+                    with self.tag("scaleOperator", scaleFactor="0.9", weight="0.5"):
+                        self.doc.stag("parameter", idref=f"flipflop.{rate}")
 
                 ## Demography
                 self.newSection("Demography", addNewline=False)
@@ -189,6 +204,9 @@ class createXML:
                         self.doc.stag("parameter", idref="flipflop.mu")
                         self.doc.stag("parameter", idref="flipflop.gamma")
                         self.doc.stag("parameter", idref="flipflop.lambda")
+                        # Scale every independent rate together when rescaling tree time.
+                        for rate in self.extraRates:
+                            self.doc.stag("parameter", idref=f"flipflop.{rate}")
                     with self.tag("down"):
                         self.doc.stag("parameter", idref="treeModel.allInternalNodeHeights")
                         # self.doc.stag("parameter", idref="luca_height")
@@ -213,6 +231,10 @@ class createXML:
                             self.doc.stag("parameter", idref="flipflop.gamma")
                         with self.tag("halfNormalPrior", mean="0.0", stdev="1"):
                             self.doc.stag("parameter", idref="flipflop.lambda")
+                        # Match nu to mu's prior and zeta to gamma's (currently identical).
+                        for rate in self.extraRates:
+                            with self.tag("halfNormalPrior", mean="0.0", stdev="0.05"):
+                                self.doc.stag("parameter", idref=f"flipflop.{rate}")
 
                         if mle:
                             with self.tag("gammaPrior", shape="2.0", scale="3.0", offset="1.0"):
@@ -258,6 +280,8 @@ class createXML:
                     self.doc.stag("parameter", idref="flipflop.mu")
                     self.doc.stag("parameter", idref="flipflop.gamma")
                     self.doc.stag("parameter", idref="flipflop.lambda")
+                    for rate in self.extraRates:
+                        self.doc.stag("parameter", idref=f"flipflop.{rate}")
                     self.doc.stag("parameter", idref="alignment.stemCells")
                     self.doc.stag("parameter", idref="treeModel.rootHeight")
                     self.doc.stag("parameter", idref="luca_height")
