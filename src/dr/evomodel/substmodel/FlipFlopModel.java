@@ -68,11 +68,24 @@ public class FlipFlopModel extends ComplexSubstitutionModel implements Likelihoo
     private Variable<Double> gammaParam;
     private Variable<Double> lambdaParam;
     private Variable<Double> muParam;
+    private Variable<Double> nuParam;
+    private Variable<Double> zetaParam;
     private double[] dummyStationaryDistribution;
     private int[][] stateVar;
     protected boolean useFrequencyModel;
 
     public FlipFlopModel(String name, DataType dataType, Parameter stemCellParam, Variable gammaParam, Variable lambdaParam, Variable muParam, boolean normalize, boolean useFrequencyModel, FrequencyModel freqModel) {
+        // Preserve the original model by sharing variables, including subsequent MCMC updates.
+        this(name, dataType, stemCellParam, gammaParam, lambdaParam, muParam, muParam, gammaParam,
+                normalize, useFrequencyModel, freqModel);
+    }
+
+    /**
+     * Construct a model with separate methylation (mu, nu) and demethylation (gamma, zeta) rates.
+     * Nu and zeta apply to cells with one methylated allele; mu and gamma apply to
+     * unmethylated and fully methylated cells, respectively.
+     */
+    public FlipFlopModel(String name, DataType dataType, Parameter stemCellParam, Variable gammaParam, Variable lambdaParam, Variable muParam, Variable nuParam, Variable zetaParam, boolean normalize, boolean useFrequencyModel, FrequencyModel freqModel) {
         super(name,dataType,freqModel,null);
 
         addVariable(stemCellParam);
@@ -83,6 +96,11 @@ public class FlipFlopModel extends ComplexSubstitutionModel implements Likelihoo
         this.lambdaParam = lambdaParam;
         addVariable(muParam);
         this.muParam = muParam;
+        // addVariable registers each distinct variable only once, allowing tied rates.
+        addVariable(nuParam);
+        this.nuParam = nuParam;
+        addVariable(zetaParam);
+        this.zetaParam = zetaParam;
         setNormalization(normalize);
         this.useFrequencyModel=useFrequencyModel;
 
@@ -123,6 +141,8 @@ public class FlipFlopModel extends ComplexSubstitutionModel implements Likelihoo
         double gamma = gammaParam.getValue(0);
         double lam = lambdaParam.getValue(0);
         double mu = muParam.getValue(0);
+        double nu = nuParam.getValue(0);
+        double zeta = zetaParam.getValue(0);
 
         for (int down = 0; down < stateCount; down++){ //Represents the new state (out-state)
             int k_down = stateVar[down][0];
@@ -135,15 +155,16 @@ public class FlipFlopModel extends ComplexSubstitutionModel implements Likelihoo
                 } else if (k == k_down & m == m_down-1){
                     amat[across][down] = m * (S-m-k) * lam / (S-1);
                 } else if (k == k_down+1 & m == m_down-1) {
-                    amat[across][down] = k * (m*lam/(S-1)+mu);
+                    amat[across][down] = k * (m*lam/(S-1)+nu);
                 } else if (k == k_down+1 & m == m_down) {
-                    amat[across][down] = k * ((S-m-k)*lam/(S-1)+gamma);
+                    amat[across][down] = k * ((S-m-k)*lam/(S-1)+zeta);
                 } else if (k == k_down & m == m_down+1) {
                     amat[across][down] = m * (S-m-k) * lam / (S-1);
                 } else if (k == k_down-1 & m == m_down+1) {
                     amat[across][down] = m * (k*lam/(S-1)+2*gamma);
                 } else if (k == k_down & m == m_down) {
-                    amat[across][down] = -(2*((k+m)*(S-m-k)+k*m)*lam/(S-1) + (k+2*m)*gamma + (2*S-(k+2*m))*mu);
+                    amat[across][down] = -(2*((k+m)*(S-m-k)+k*m)*lam/(S-1)
+                            + k*zeta + 2*m*gamma + 2*(S-m-k)*mu + k*nu);
                 } else {
                     amat[across][down] = 0;
                 }

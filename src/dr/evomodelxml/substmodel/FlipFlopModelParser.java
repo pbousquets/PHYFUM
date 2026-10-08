@@ -52,6 +52,8 @@ public class FlipFlopModelParser extends AbstractXMLObjectParser {
     public static final String GAMMA = "gamma";
     public static final String LAMBDA = "lambda";
     public static final String MU = "mu";
+    public static final String NU = "nu";
+    public static final String ZETA = "zeta";
     public static final String NORMALIZE = "normalize";
     public static final String FREQUENCIES = "frequencies";
 
@@ -65,6 +67,9 @@ public class FlipFlopModelParser extends AbstractXMLObjectParser {
         Variable gammaParam = (Variable) xo.getElementFirstChild(GAMMA);
         Variable lambdaParam = (Variable) xo.getElementFirstChild(LAMBDA);
         Variable muParam = (Variable) xo.getElementFirstChild(MU);
+        // Reuse the original variables when omitted, so rates remain tied during sampling.
+        Variable nuParam = xo.hasChildNamed(NU) ? (Variable) xo.getElementFirstChild(NU) : muParam;
+        Variable zetaParam = xo.hasChildNamed(ZETA) ? (Variable) xo.getElementFirstChild(ZETA) : gammaParam;
         boolean normalize = xo.getAttribute(NORMALIZE, false);
 
         PatternList data = (PatternList) xo.getChild(PatternList.class);
@@ -78,6 +83,8 @@ public class FlipFlopModelParser extends AbstractXMLObjectParser {
         sb.append("\n\t- Initial gamma = " + gammaParam.getValue(0));
         sb.append("\n\t- Initial lambda = " + lambdaParam.getValue(0));
         sb.append("\n\t- Initial mu = " + muParam.getValue(0));
+        sb.append("\n\t- Initial nu = " + nuParam.getValue(0) + (nuParam == muParam ? " (tied to mu)" : ""));
+        sb.append("\n\t- Initial zeta = " + zetaParam.getValue(0) + (zetaParam == gammaParam ? " (tied to gamma)" : ""));
         sb.append("\n\t- Normalization using flux of out-states: " + normalize);
 
         boolean updateDimension = false;
@@ -130,7 +137,8 @@ public class FlipFlopModelParser extends AbstractXMLObjectParser {
         sb.append("\n---");
         Logger.getLogger("dr.evomodel").info(sb.toString());
 
-        return new FlipFlopModel(xo.getId(), dataType, stemCellParam, gammaParam, lambdaParam, muParam, normalize, useFrequencyModel, freqModel);
+        return new FlipFlopModel(xo.getId(), dataType, stemCellParam, gammaParam, lambdaParam, muParam,
+                nuParam, zetaParam, normalize, useFrequencyModel, freqModel);
     }
 
     //************************************************************************
@@ -138,7 +146,8 @@ public class FlipFlopModelParser extends AbstractXMLObjectParser {
     //************************************************************************
 
     public String getParserDescription() {
-        return "This element represents an instance of the flipflop model (Gabbutt, 2022), depicting the dynamics of fluctuating CpG sites.";
+        return "This element represents an instance of the flipflop model (Gabbutt, 2022), depicting the dynamics of fluctuating CpG sites. "
+                + "Optional nu and zeta rates default to the mu and gamma variables, respectively.";
     }
 
     public Class getReturnType() {
@@ -156,6 +165,10 @@ public class FlipFlopModelParser extends AbstractXMLObjectParser {
                     new XMLSyntaxRule[]{new ElementRule(Variable.class)}),
             new ElementRule(MU,
                     new XMLSyntaxRule[]{new ElementRule(Variable.class)}),
+            new ElementRule(NU,
+                    new XMLSyntaxRule[]{new ElementRule(Variable.class)}, true),
+            new ElementRule(ZETA,
+                    new XMLSyntaxRule[]{new ElementRule(Variable.class)}, true),
             new ElementRule(STEM_CELLS,
                     new XMLSyntaxRule[]{new ElementRule(Variable.class)}),
             new ElementRule(PatternList.class,false),

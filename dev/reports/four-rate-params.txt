@@ -1,0 +1,90 @@
+PHYFUM four-rate model implementation
+Date: 2026-10-08
+Branch: four-rate-params_AI
+
+Project orientation
+-------------------
+PHYFUM is the BEAST-based Java inference implementation. The model is in
+src/dr/evomodel/substmodel/FlipFlopModel.java and its XML interface is in
+src/dr/evomodelxml/substmodel/FlipFlopModelParser.java. Related code includes
+the AFsequence data type, FlipFlopErrorModel observation model, frequency
+models, and tests in src/test/dr/evomodel/flipflop/. The Ant build compiles
+the application and tests; dr.app.beast.BeastMain is the entry point.
+Application runs require -beagle_off.
+
+simulate/ contains the Python simulator and XMLgenerator/createXML.py.
+examples/release/flipflop/ contains inference configurations, including
+sim1Absolute.xml. The separate flipflop repository was used only as reference.
+
+Changes
+-------
+Compared flipflop's main and four-rate-params branches, specifically
+flipflop/flipflop_model.pyx:generateRateMatrix. Implemented its changes in
+PHYFUM's existing storeIntoAmat method. PHYFUM stores source states in rows;
+the reference stores source states in columns, so the matrices are transposes.
+
+For state (k,m), k counts cells with one methylated allele and m counts cells
+with two methylated alleles. The modified transitions are:
+  (k,m) -> (k-1,m+1): k * (m*lambda/(S-1) + nu)
+  (k,m) -> (k-1,m):   k * ((S-m-k)*lambda/(S-1) + zeta)
+The diagonal is now:
+  -(2*((k+m)*(S-m-k)+k*m)*lambda/(S-1)
+    + k*zeta + 2*m*gamma + 2*(S-m-k)*mu + k*nu)
+All other transition expressions retain their original rates.
+
+The model supports independent nu and zeta variables and registers them for
+parameter-change notifications and state storage/restoration. Its original
+Java constructor remains available and delegates with nu=mu and zeta=gamma.
+
+XML behavior
+------------
+lambda, mu, and gamma remain required. nu and zeta are individually optional:
+  omitted nu   -> the same Variable object as mu
+  omitted zeta -> the same Variable object as gamma
+These are shared references, not copied initial values. Consequently, MCMC
+changes to mu or gamma automatically affect the corresponding omitted rate.
+Explicit parameter idref sharing is also supported.
+
+To use independent rates, add these children inside the existing flipflopModel:
+
+  <nu>
+      <parameter id="flipflop.nu" value="0.1" lower="0.0"/>
+  </nu>
+  <zeta>
+      <parameter id="flipflop.zeta" value="0.1" lower="0.0"/>
+  </zeta>
+
+Add operators, priors, and log entries for these parameter IDs as appropriate
+when estimating them. Supplying a parameter alone does not schedule proposals.
+Existing XML files and createXML.py output retain the original tied-rate model;
+the generator was not extended to emit independent rates in this change.
+
+Validation
+----------
+Used the installed JDK 18 to compile Java 8 source/target without changing
+build.xml. Build command from PHYFUM:
+  JAVA_HOME=/Library/Java/JavaVirtualMachines/jdk-18.0.1.1.jdk/Contents/Home ant compile-all junit_flipflop
+
+Compilation passed. The new TestFlipFlopFourRates suite passed all five tests:
+  - Hand-calculated asymmetric six-state matrix, including the explicit
+    diagonal before makeValid; zero rate-row sums and stochastic transitions.
+  - Original constructor and tied-rate updates with normalization and
+    supplied-frequency modes both enabled and disabled.
+  - Independent nu/zeta updates invalidate cached transition probabilities;
+    stored model states restore parameters and transition probabilities.
+  - Strict XML parsing of all four omission/override combinations, followed
+    by mu/gamma changes to check shared references and independent overrides.
+  - Explicit XML idref sharing without duplicate model variables.
+
+The six correctly discovered suites passed 13 tests in total. The Ant target
+also attempted test.dr.evomodel.flipflop.TestSubstitutionModelEmpiricalFrequencies,
+which has a pre-existing package declaration of dr.evomodel.flipflop. This
+causes a ClassNotFoundException in that target even though Ant reports success.
+Ran this unchanged test separately using its declared package:
+  /Library/Java/JavaVirtualMachines/jdk-18.0.1.1.jdk/Contents/Home/bin/java -cp 'build:lib/*' org.junit.runner.JUnitCore dr.evomodel.flipflop.TestSubstitutionModelEmpiricalFrequencies
+It passed (one test), bringing the total to 14 passing tests. The unrelated
+package mismatch was left unchanged. No long inference chain was run.
+
+Only the existing PHYFUM model/parser source files were modified; both had
+changes after commit 056fb40. Added the focused test class and this report.
+No reference-repository files were modified and no commits were pushed.
