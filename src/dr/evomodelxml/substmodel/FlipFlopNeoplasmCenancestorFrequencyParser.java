@@ -15,7 +15,6 @@ public class FlipFlopNeoplasmCenancestorFrequencyParser extends AbstractXMLObjec
     public static final String FREQUENCY_MODEL = "flipflopNeoplasmCenancestorFrequency";
     public static final String FREQUENCIES = "frequencies";
     public static final String METHYLATED_PROPORTION = "methylatedProportion";
-    public static final String ELAPSED_TIME = "elapsedTime";
     public static final String ORIGIN_HEIGHT = "originHeight";
     public static final String CENANCESTOR_HEIGHT = "cenancestorHeight";
 
@@ -31,28 +30,23 @@ public class FlipFlopNeoplasmCenancestorFrequencyParser extends AbstractXMLObjec
         Parameter nu = xo.hasChildNamed("nu") ? parameter(xo, "nu") : mu;
         Parameter zeta = xo.hasChildNamed("zeta") ? parameter(xo, "zeta") : gamma;
 
-        boolean hasElapsed = xo.hasChildNamed(ELAPSED_TIME);
-        boolean hasOrigin = xo.hasChildNamed(ORIGIN_HEIGHT);
-        boolean hasCenancestor = xo.hasChildNamed(CENANCESTOR_HEIGHT);
-        if (hasElapsed ? (hasOrigin || hasCenancestor) : !hasCenancestor) {
-            throw new XMLParseException("Specify elapsedTime OR cenancestorHeight with an optional originHeight");
+        // Reject the removed option even when BEAST's strict XML checking is disabled.
+        if (xo.hasChildNamed("elapsedTime")) {
+            throw new XMLParseException("elapsedTime is no longer supported; use cenancestorHeight with an optional originHeight");
         }
-        Parameter elapsedTime;
-        if (hasElapsed) {
-            elapsedTime = parameter(xo, ELAPSED_TIME);
-        } else {
-            Parameter origin = hasOrigin ? parameter(xo, ORIGIN_HEIGHT) : inferOriginHeight(patterns);
-            Parameter cenancestor = parameter(xo, CENANCESTOR_HEIGHT);
-            if (origin.getDimension() != 1 || cenancestor.getDimension() != 1
-                    || !Double.isFinite(origin.getParameterValue(0))
-                    || !Double.isFinite(cenancestor.getParameterValue(0))
-                    || origin.getParameterValue(0) < 0 || cenancestor.getParameterValue(0) < 0) {
-                throw new XMLParseException("originHeight and cenancestorHeight must be finite nonnegative scalars");
-            }
-            // BEAST heights increase backwards in time. For contemporaneous samples,
-            // originHeight is their age measured from origin time zero.
-            elapsedTime = new DifferenceParameter(Arrays.asList(origin, cenancestor));
+        Parameter cenancestor = parameter(xo, CENANCESTOR_HEIGHT);
+        Parameter origin = xo.hasChildNamed(ORIGIN_HEIGHT) ? parameter(xo, ORIGIN_HEIGHT) : inferOriginHeight(patterns);
+        if (origin.getDimension() != 1 || cenancestor.getDimension() != 1
+                || !Double.isFinite(origin.getParameterValue(0))
+                || !Double.isFinite(cenancestor.getParameterValue(0))
+                || origin.getParameterValue(0) < 0 || cenancestor.getParameterValue(0) < 0) {
+            throw new XMLParseException("originHeight and cenancestorHeight must be finite nonnegative scalars");
         }
+        if (origin.getParameterValue(0) < cenancestor.getParameterValue(0)) {
+            throw new XMLParseException("originHeight must be greater than or equal to cenancestorHeight");
+        }
+        // BEAST heights increase backwards in time. The duration is always derived.
+        Parameter elapsedTime = new DifferenceParameter(Arrays.asList(origin, cenancestor));
 
         boolean hasFrequencies = xo.hasChildNamed(FREQUENCIES);
         boolean hasProportion = xo.hasChildNamed(METHYLATED_PROPORTION);
@@ -142,7 +136,7 @@ public class FlipFlopNeoplasmCenancestorFrequencyParser extends AbstractXMLObjec
 
     public String getParserDescription() {
         return "Evolve origin frequencies (unmethylated, hemimethylated, methylated) through a single-cell "
-                + "phase, then expand clonally to the alignment's niche size. Use elapsedTime or the difference "
+                + "phase, then expand clonally to the alignment's niche size over the duration "
                 + "originHeight - cenancestorHeight in BEAST height units. Omitted originHeight defaults to the largest "
                 + "alignment sample age (forwards dates with common units and origin). Rates are absolute; omitted nu/zeta share mu/gamma.";
     }
@@ -161,11 +155,8 @@ public class FlipFlopNeoplasmCenancestorFrequencyParser extends AbstractXMLObjec
             new ElementRule(METHYLATED_PROPORTION, new XMLSyntaxRule[]{new ElementRule(Parameter.class)}, true),
             AttributeRule.newDoubleRule(METHYLATED_PROPORTION, true),
             AttributeRule.newBooleanRule("normalize", true),
-            new XORRule(
-                    new ElementRule(ELAPSED_TIME, new XMLSyntaxRule[]{new ElementRule(Parameter.class)}),
-                    new AndRule(
-                            new ElementRule(ORIGIN_HEIGHT, new XMLSyntaxRule[]{new ElementRule(Parameter.class)}, true),
-                            new ElementRule(CENANCESTOR_HEIGHT, new XMLSyntaxRule[]{new ElementRule(Parameter.class)}))),
+            new ElementRule(ORIGIN_HEIGHT, new XMLSyntaxRule[]{new ElementRule(Parameter.class)}, true),
+            new ElementRule(CENANCESTOR_HEIGHT, new XMLSyntaxRule[]{new ElementRule(Parameter.class)}),
             new ElementRule("mu", new XMLSyntaxRule[]{new ElementRule(Parameter.class)}),
             new ElementRule("gamma", new XMLSyntaxRule[]{new ElementRule(Parameter.class)}),
             new ElementRule("nu", new XMLSyntaxRule[]{new ElementRule(Parameter.class)}, true),

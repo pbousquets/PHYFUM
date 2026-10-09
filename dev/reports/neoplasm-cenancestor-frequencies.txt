@@ -47,13 +47,11 @@ an H founder produces S hemimethylated cells, not a mixture of U and M cells.
 
 Time coordinates and parameter sharing
 --------------------------------------
-Choose exactly one XML time specification:
-  1. cenancestorHeight with an optional originHeight (scalar parameters). Duration is
-     originHeight - cenancestorHeight, using BEAST's backwards height axis.
-     For contemporaneous samples aged 45 from origin time zero, originHeight=45;
-     a cenancestorHeight of 40 gives five units of founder-cell evolution.
-  2. elapsedTime (scalar parameter), when the nonnegative duration is supplied
-     directly, possibly via an existing derived parameter.
+Specify cenancestorHeight with an optional originHeight (scalar parameters).
+Duration is always originHeight - cenancestorHeight, using BEAST's backwards
+height axis. For contemporaneous samples aged 45 from origin time zero,
+originHeight=45; a cenancestorHeight of 40 gives five units of founder-cell
+evolution. The standalone elapsedTime XML option has been removed.
 
 If originHeight is omitted, the parser initializes it to the largest sample age
 in the supplied alignment. All alignment taxa must have finite, nonnegative
@@ -61,7 +59,7 @@ forwards dates with matching units and a common origin. Missing dates, empty
 taxon lists, backwards dates, and incompatible units/origins produce an XML
 error requesting explicit originHeight. Dates must represent ages measured
 from the biological origin; arbitrary calendar dates do not encode that age.
-An explicit originHeight or elapsedTime bypasses inference. The inferred origin
+An explicit originHeight bypasses inference. The inferred origin
 is fixed input metadata, while cenancestorHeight remains live during sampling.
 Only alignment taxa are inspected; BEAST's global taxon date cache is not used.
 
@@ -171,3 +169,11 @@ Four added parser tests cover mixed/equal sample ages, live cenancestor-height
 updates, zero age, negative inferred duration, explicit overrides (including
 missing or backwards sample dates), absent taxa/dates, nonfinite or negative
 ages, and mismatched date units/origins. No model or likelihood edits were needed.
+
+Removal of the standalone duration option
+----------------------------------------
+cenancestorHeight is now required by the XML syntax, with originHeight optional.
+Legacy elapsedTime elements are rejected even with strict XML checking disabled.
+Negative initial durations report the required ordering of the two heights.
+Updated parser tests use height-based inputs and check legacy-option rejection.
+Ran ant compile-all junit_flipflop with JDK 18: all 32 tests passed.

@@ -81,11 +81,11 @@ public class TestFlipFlopNeoplasmParser extends TestCase {
         }) {
             XMLParser inferred = parse("", ROOT,
                     "<cenancestorHeight><parameter id='height' value='40'/></cenancestorHeight>", "", datedPatterns(dates));
-            XMLParser expected = parse("", ROOT, "<elapsedTime><parameter value='5'/></elapsedTime>", "");
+            XMLParser expected = parse("", ROOT, HEIGHTS.replace("value='5'", "value='7'"), "");
             assertSameFrequencies(frequencies(expected).getFrequencies(), frequencies(inferred).getFrequencies());
             // The inferred origin is fixed, but the shared cenancestor height stays live.
             parameter(inferred, "height").setParameterValue(0, 44);
-            expected = parse("", ROOT, "<elapsedTime><parameter value='1'/></elapsedTime>", "");
+            expected = parse("", ROOT, HEIGHTS.replace("value='5'", "value='3'"), "");
             assertSameFrequencies(frequencies(expected).getFrequencies(), frequencies(inferred).getFrequencies());
         }
     }
@@ -99,11 +99,11 @@ public class TestFlipFlopNeoplasmParser extends TestCase {
             parse("", ROOT, "<cenancestorHeight><parameter value='1'/></cenancestorHeight>", "", zeroAge);
             fail("Negative inferred duration accepted");
         } catch (XMLParseException expected) {
-            assertTrue(expected.getMessage().contains("elapsedTime"));
+            assertTrue(expected.getMessage().contains("originHeight must be greater than or equal to cenancestorHeight"));
         }
     }
 
-    public void testExplicitTimeInputsOverrideSampleAges() throws Exception {
+    public void testExplicitOriginOverridesSampleAges() throws Exception {
         double[] expected = frequencies(parse("", ROOT, HEIGHTS, "")).getFrequencies();
         for (Patterns patterns : new Patterns[]{
                 datedPatterns(new Date(45, Units.Type.YEARS, false)),
@@ -111,8 +111,6 @@ public class TestFlipFlopNeoplasmParser extends TestCase {
                 datedPatterns(new Date(45, Units.Type.YEARS, true))
         }) {
             assertSameFrequencies(expected, frequencies(parse("", ROOT, HEIGHTS, "", patterns)).getFrequencies());
-            assertSameFrequencies(expected, frequencies(parse("", ROOT,
-                    "<elapsedTime><parameter value='3'/></elapsedTime>", "", patterns)).getFrequencies());
         }
     }
 
@@ -156,12 +154,33 @@ public class TestFlipFlopNeoplasmParser extends TestCase {
         }
     }
 
-    public void testHeightsAndExplicitElapsedTimeAgree() throws Exception {
+    public void testHeightsDetermineDuration() throws Exception {
         XMLParser heights = parse("", ROOT, HEIGHTS, "");
-        XMLParser elapsed = parse("", ROOT, "<elapsedTime><parameter value='3'/></elapsedTime>", "");
-        assertSameFrequencies(frequencies(elapsed).getFrequencies(), frequencies(heights).getFrequencies());
+        Parameter mu = new Parameter.Default(0.03);
+        Parameter gamma = new Parameter.Default(0.02);
+        FlipFlopNeoplasmCenancestorFrequencyModel expected = new FlipFlopNeoplasmCenancestorFrequencyModel(
+                new AFsequence(6), new Parameter.Default(new double[]{0.5, 0, 0.5}),
+                new Parameter.Default(3.0), mu, gamma, mu, gamma);
+        assertSameFrequencies(expected.getFrequencies(), frequencies(heights).getFrequencies());
         parameter(heights, "height").setParameterValueQuietly(0, 5);
         assertSameFrequencies(new double[]{0.5, 0, 0, 0, 0, 0.5}, frequencies(heights).getFrequencies());
+    }
+
+    public void testRemovedElapsedTimeRejectedWithoutStrictChecking() throws Exception {
+        for (String time : new String[]{"<elapsedTime><parameter value='3'/></elapsedTime>",
+                HEIGHTS + "<elapsedTime><parameter value='3'/></elapsedTime>"}) {
+            XMLParser parser = new XMLParser(false, false);
+            parser.addXMLObjectParser(new ParameterParser());
+            parser.addXMLObjectParser(new FlipFlopNeoplasmCenancestorFrequencyParser());
+            store(parser, "patterns", new Patterns(new AFsequence(6)));
+            try {
+                parser.parse(new StringReader("<beast>" + modelXml("", ROOT, time, "") + "</beast>"), false);
+                fail("Removed elapsedTime option accepted");
+            } catch (XMLParseException expected) {
+                // No legacy elapsedTime input should silently change the intended duration.
+                assertTrue(expected.getMessage().contains("cenancestorHeight"));
+            }
+        }
     }
 
     public void testTiedAndIndependentRates() throws Exception {
