@@ -1,7 +1,7 @@
 Neoplasm cenancestor frequency model
 Date: 2026-10-08
-Branch: neoplasm
-Base: local master, d17339e364c0340e5537ab8ce4e8e4852edd6aa4
+Branch: neoplasm_AI
+Base: four-rate-params_AI, 7bf5b2098 (latest commit at the requested rebase)
 
 Implementation
 --------------
@@ -109,11 +109,13 @@ Changes to this parameter update the origin distribution and likelihood.
 
 Scope
 -----
-This branch starts from master as requested. Previous four-rate model/generator
-commits and the Ant test-package fix remain on four-rate-params_AI. The general
-post-cenancestor substitution model on neoplasm therefore retains master's
-original tied rates. Independent nu/zeta here govern the new founder-cell phase.
-No XML generator, simulator, original example, or reference repository was edited.
+Following the revised request, the neoplasm implementation was rebased onto
+the latest four-rate-params_AI commit and the branch renamed neoplasm_AI.
+It now includes the four-rate substitution model, XML generator option and
+example, and Ant test-package fix from that base. The founder-cell phase also
+supports independent nu/zeta; XML parameter references can share those rates
+with the post-cenancestor model. The neoplasm-specific XML generator extension
+remains deferred. No simulator or reference repository was edited.
 
 Validation
 ----------
@@ -132,9 +134,13 @@ Actual CenancestorTreeLikelihood integration checks cover founder-only rate
 changes, root distributions, origin/cenancestor/branch/tree-height proposals,
 and rejection/restoration in both heightRules and branchRules modes.
 
-The empirical-frequency test was invoked under its package on master,
-dr.evomodel.flipflop.TestSubstitutionModelEmpiricalFrequencies. Its existing
-Ant discovery mismatch was not reintroduced or modified by this work.
+Before the rebase, the empirical-frequency test was invoked under its package
+on master, dr.evomodel.flipflop.TestSubstitutionModelEmpiricalFrequencies.
+The new base includes the package correction, allowing Ant to discover it.
+
+After the rebase, ran:
+  JAVA_HOME=/Library/Java/JavaVirtualMachines/jdk-18.0.1.1.jdk/Contents/Home ant compile-all junit_flipflop
+Compilation and all 27 tests across nine suites passed with no failures or errors.
 
 A temporary copy of sim1Absolute.xml using the registered new parser completed
 500 MCMC steps with dr.app.beast.BeastMain -beagle_off -seed 12345. This used
