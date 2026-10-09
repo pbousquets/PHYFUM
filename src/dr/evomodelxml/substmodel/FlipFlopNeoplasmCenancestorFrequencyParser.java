@@ -2,6 +2,7 @@ package dr.evomodelxml.substmodel;
 
 import dr.evolution.alignment.PatternList;
 import dr.evolution.datatype.DataType;
+import dr.evolution.util.Date;
 import dr.evomodel.substmodel.FlipFlopNeoplasmCenancestorFrequencyModel;
 import dr.inference.model.DifferenceParameter;
 import dr.inference.model.Parameter;
@@ -23,7 +24,8 @@ public class FlipFlopNeoplasmCenancestorFrequencyParser extends AbstractXMLObjec
     }
 
     public Object parseXMLObject(XMLObject xo) throws XMLParseException {
-        DataType dataType = ((PatternList) xo.getChild(PatternList.class)).getDataType();
+        PatternList patterns = (PatternList) xo.getChild(PatternList.class);
+        DataType dataType = patterns.getDataType();
         Parameter mu = parameter(xo, "mu");
         Parameter gamma = parameter(xo, "gamma");
         Parameter nu = xo.hasChildNamed("nu") ? parameter(xo, "nu") : mu;
@@ -32,14 +34,14 @@ public class FlipFlopNeoplasmCenancestorFrequencyParser extends AbstractXMLObjec
         boolean hasElapsed = xo.hasChildNamed(ELAPSED_TIME);
         boolean hasOrigin = xo.hasChildNamed(ORIGIN_HEIGHT);
         boolean hasCenancestor = xo.hasChildNamed(CENANCESTOR_HEIGHT);
-        if (hasElapsed ? (hasOrigin || hasCenancestor) : !(hasOrigin && hasCenancestor)) {
-            throw new XMLParseException("Specify elapsedTime OR both originHeight and cenancestorHeight");
+        if (hasElapsed ? (hasOrigin || hasCenancestor) : !hasCenancestor) {
+            throw new XMLParseException("Specify elapsedTime OR cenancestorHeight with an optional originHeight");
         }
         Parameter elapsedTime;
         if (hasElapsed) {
             elapsedTime = parameter(xo, ELAPSED_TIME);
         } else {
-            Parameter origin = parameter(xo, ORIGIN_HEIGHT);
+            Parameter origin = hasOrigin ? parameter(xo, ORIGIN_HEIGHT) : inferOriginHeight(patterns);
             Parameter cenancestor = parameter(xo, CENANCESTOR_HEIGHT);
             if (origin.getDimension() != 1 || cenancestor.getDimension() != 1
                     || !Double.isFinite(origin.getParameterValue(0))
@@ -105,10 +107,44 @@ public class FlipFlopNeoplasmCenancestorFrequencyParser extends AbstractXMLObjec
         return (Parameter) xo.getElementFirstChild(name);
     }
 
+    /** Infer once from this alignment's ages, avoiding BEAST's global taxon date cache. */
+    private static Parameter inferOriginHeight(PatternList patterns) throws XMLParseException {
+        final String guidance = "; supply an explicit originHeight instead";
+        final int count;
+        try {
+            count = patterns.getTaxonCount();
+        } catch (RuntimeException error) {
+            throw new XMLParseException("Cannot infer originHeight without alignment taxa" + guidance);
+        }
+        if (count == 0) {
+            throw new XMLParseException("Cannot infer originHeight from an empty taxon list" + guidance);
+        }
+        Date reference = null;
+        double maximumAge = 0;
+        for (int i = 0; i < count; i++) {
+            Date date = patterns.getTaxon(i).getDate();
+            if (date == null || date.isBackwards() || !Double.isFinite(date.getTimeValue())
+                    || date.getTimeValue() < 0 || !Double.isFinite(date.getOrigin())) {
+                throw new XMLParseException("Cannot infer originHeight: sample " + patterns.getTaxonId(i)
+                        + " must have a finite nonnegative forwards age" + guidance);
+            }
+            if (reference != null && (date.getUnits() != reference.getUnits()
+                    || date.getOrigin() != reference.getOrigin())) {
+                throw new XMLParseException("Cannot infer originHeight: sample ages must use the same units and origin"
+                        + guidance);
+            }
+            reference = date;
+            maximumAge = Math.max(maximumAge, date.getTimeValue());
+        }
+        // The dates are fixed input metadata; the cenancestor height remains a live parameter.
+        return new Parameter.Default(maximumAge);
+    }
+
     public String getParserDescription() {
         return "Evolve origin frequencies (unmethylated, hemimethylated, methylated) through a single-cell "
                 + "phase, then expand clonally to the alignment's niche size. Use elapsedTime or the difference "
-                + "originHeight - cenancestorHeight in BEAST height units. Rates are absolute; omitted nu/zeta share mu/gamma.";
+                + "originHeight - cenancestorHeight in BEAST height units. Omitted originHeight defaults to the largest "
+                + "alignment sample age (forwards dates with common units and origin). Rates are absolute; omitted nu/zeta share mu/gamma.";
     }
 
     public Class getReturnType() {
@@ -128,7 +164,7 @@ public class FlipFlopNeoplasmCenancestorFrequencyParser extends AbstractXMLObjec
             new XORRule(
                     new ElementRule(ELAPSED_TIME, new XMLSyntaxRule[]{new ElementRule(Parameter.class)}),
                     new AndRule(
-                            new ElementRule(ORIGIN_HEIGHT, new XMLSyntaxRule[]{new ElementRule(Parameter.class)}),
+                            new ElementRule(ORIGIN_HEIGHT, new XMLSyntaxRule[]{new ElementRule(Parameter.class)}, true),
                             new ElementRule(CENANCESTOR_HEIGHT, new XMLSyntaxRule[]{new ElementRule(Parameter.class)}))),
             new ElementRule("mu", new XMLSyntaxRule[]{new ElementRule(Parameter.class)}),
             new ElementRule("gamma", new XMLSyntaxRule[]{new ElementRule(Parameter.class)}),

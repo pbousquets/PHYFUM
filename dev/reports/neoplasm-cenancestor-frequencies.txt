@@ -48,12 +48,22 @@ an H founder produces S hemimethylated cells, not a mixture of U and M cells.
 Time coordinates and parameter sharing
 --------------------------------------
 Choose exactly one XML time specification:
-  1. originHeight and cenancestorHeight (scalar parameters). Duration is
+  1. cenancestorHeight with an optional originHeight (scalar parameters). Duration is
      originHeight - cenancestorHeight, using BEAST's backwards height axis.
      For contemporaneous samples aged 45 from origin time zero, originHeight=45;
      a cenancestorHeight of 40 gives five units of founder-cell evolution.
   2. elapsedTime (scalar parameter), when the nonnegative duration is supplied
      directly, possibly via an existing derived parameter.
+
+If originHeight is omitted, the parser initializes it to the largest sample age
+in the supplied alignment. All alignment taxa must have finite, nonnegative
+forwards dates with matching units and a common origin. Missing dates, empty
+taxon lists, backwards dates, and incompatible units/origins produce an XML
+error requesting explicit originHeight. Dates must represent ages measured
+from the biological origin; arbitrary calendar dates do not encode that age.
+An explicit originHeight or elapsedTime bypasses inference. The inferred origin
+is fixed input metadata, while cenancestorHeight remains live during sampling.
+Only alignment taxa are inspected; BEAST's global taxon date cache is not used.
 
 Share the same cenancestorHeight parameter with the tree likelihood using
 idref. No cyclic model dependency is needed. Heights/proposals must keep the
@@ -89,6 +99,9 @@ XML example fragment (the referenced alignment and rates must already exist)
 Inside the existing cenancestorTreeLikelihood, use:
   <flipflopNeoplasmCenancestorFrequency idref="neoplasmFrequencies"/>
   <cenancestorHeight><parameter idref="luca_height"/></cenancestorHeight>
+
+The originHeight block above may now be omitted when alignment sample ages
+encode the same origin (e.g. forwards ages 40, 45, 42 yield originHeight=45).
 
 Both nu and zeta are individually optional; omission shares the actual mu or
 gamma parameter respectively. No lambda is required by the founder model.
@@ -150,3 +163,11 @@ height, nu, and zeta changes successfully. This checks execution, not convergenc
 The temporary XML, build, and run outputs are in /private/tmp/phyfum-neoplasm.4NhFor/.
 
 git diff --check passed. Nothing was pushed.
+
+Validation of origin-height inference
+------------------------------------
+Ran ant compile-all junit_flipflop with the same JDK 18: all 31 tests passed.
+Four added parser tests cover mixed/equal sample ages, live cenancestor-height
+updates, zero age, negative inferred duration, explicit overrides (including
+missing or backwards sample dates), absent taxa/dates, nonfinite or negative
+ages, and mismatched date units/origins. No model or likelihood edits were needed.

@@ -3,8 +3,10 @@ package test.dr.evomodel.flipflop;
 import dr.evolution.alignment.Patterns;
 import dr.evolution.datatype.AFsequence;
 import dr.evolution.io.NewickImporter;
+import dr.evolution.util.Date;
 import dr.evolution.util.Taxa;
 import dr.evolution.util.Taxon;
+import dr.evolution.util.Units;
 import dr.evomodel.branchratemodel.StrictClockCenancestorBranchRates;
 import dr.evomodel.sitemodel.GammaSiteModel;
 import dr.evomodel.substmodel.*;
@@ -45,12 +47,94 @@ public class TestFlipFlopNeoplasmParser extends TestCase {
     }
 
     private XMLParser parse(String attributes, String origin, String time, String extraRates) throws Exception {
+        return parse(attributes, origin, time, extraRates, new Patterns(new AFsequence(6)));
+    }
+
+    private XMLParser parse(String attributes, String origin, String time, String extraRates,
+            Patterns patterns) throws Exception {
         XMLParser parser = new XMLParser(false, true);
         parser.addXMLObjectParser(new ParameterParser());
         parser.addXMLObjectParser(new FlipFlopNeoplasmCenancestorFrequencyParser());
-        store(parser, "patterns", new Patterns(new AFsequence(6)));
+        store(parser, "patterns", patterns);
         parser.parse(new StringReader("<beast>" + modelXml(attributes, origin, time, extraRates) + "</beast>"), false);
         return parser;
+    }
+
+    private Patterns datedPatterns(Date... dates) {
+        Taxa taxa = new Taxa();
+        for (int i = 0; i < dates.length; i++) {
+            Taxon taxon = new Taxon("sample" + i);
+            // Supply metadata without changing BEAST's process-wide date cache.
+            if (dates[i] != null) {
+                taxon.setAttribute("date", dates[i]);
+            }
+            taxa.addTaxon(taxon);
+        }
+        return new Patterns(new AFsequence(6), taxa);
+    }
+
+    public void testOriginInferredFromLargestAlignmentAge() throws Exception {
+        for (Date[] dates : new Date[][]{
+                {new Date(40, Units.Type.YEARS, false), new Date(45, Units.Type.YEARS, false),
+                        new Date(42, Units.Type.YEARS, false)},
+                {new Date(45, Units.Type.YEARS, false), new Date(45, Units.Type.YEARS, false)}
+        }) {
+            XMLParser inferred = parse("", ROOT,
+                    "<cenancestorHeight><parameter id='height' value='40'/></cenancestorHeight>", "", datedPatterns(dates));
+            XMLParser expected = parse("", ROOT, "<elapsedTime><parameter value='5'/></elapsedTime>", "");
+            assertSameFrequencies(frequencies(expected).getFrequencies(), frequencies(inferred).getFrequencies());
+            // The inferred origin is fixed, but the shared cenancestor height stays live.
+            parameter(inferred, "height").setParameterValue(0, 44);
+            expected = parse("", ROOT, "<elapsedTime><parameter value='1'/></elapsedTime>", "");
+            assertSameFrequencies(frequencies(expected).getFrequencies(), frequencies(inferred).getFrequencies());
+        }
+    }
+
+    public void testZeroSampleAgeAndInferredOriginBeforeCenancestor() throws Exception {
+        Patterns zeroAge = datedPatterns(new Date(0, Units.Type.YEARS, false));
+        XMLParser parser = parse("", ROOT,
+                "<cenancestorHeight><parameter value='0'/></cenancestorHeight>", "", zeroAge);
+        assertSameFrequencies(new double[]{0.5, 0, 0, 0, 0, 0.5}, frequencies(parser).getFrequencies());
+        try {
+            parse("", ROOT, "<cenancestorHeight><parameter value='1'/></cenancestorHeight>", "", zeroAge);
+            fail("Negative inferred duration accepted");
+        } catch (XMLParseException expected) {
+            assertTrue(expected.getMessage().contains("elapsedTime"));
+        }
+    }
+
+    public void testExplicitTimeInputsOverrideSampleAges() throws Exception {
+        double[] expected = frequencies(parse("", ROOT, HEIGHTS, "")).getFrequencies();
+        for (Patterns patterns : new Patterns[]{
+                datedPatterns(new Date(45, Units.Type.YEARS, false)),
+                datedPatterns((Date) null),
+                datedPatterns(new Date(45, Units.Type.YEARS, true))
+        }) {
+            assertSameFrequencies(expected, frequencies(parse("", ROOT, HEIGHTS, "", patterns)).getFrequencies());
+            assertSameFrequencies(expected, frequencies(parse("", ROOT,
+                    "<elapsedTime><parameter value='3'/></elapsedTime>", "", patterns)).getFrequencies());
+        }
+    }
+
+    public void testIncompatibleDatesRequireExplicitOrigin() throws Exception {
+        Date valid = new Date(45, Units.Type.YEARS, false);
+        Patterns[] invalid = {
+                new Patterns(new AFsequence(6)), datedPatterns(), datedPatterns(valid, null),
+                datedPatterns(new Date(45, Units.Type.YEARS, true)),
+                datedPatterns(new Date(-1, Units.Type.YEARS, false)),
+                datedPatterns(new Date(Double.NaN, Units.Type.YEARS, false)),
+                datedPatterns(new Date(Double.POSITIVE_INFINITY, Units.Type.YEARS, false)),
+                datedPatterns(valid, new Date(46, Units.Type.MONTHS, false)),
+                datedPatterns(valid, Date.createTimeSinceOrigin(46, Units.Type.YEARS, 1.0))
+        };
+        for (Patterns patterns : invalid) {
+            try {
+                parse("", ROOT, "<cenancestorHeight><parameter value='2'/></cenancestorHeight>", "", patterns);
+                fail("Incompatible sample dates accepted");
+            } catch (XMLParseException expected) {
+                assertTrue(expected.getMessage().contains("explicit originHeight"));
+            }
+        }
     }
 
     private Object object(XMLParser parser, String id) {
