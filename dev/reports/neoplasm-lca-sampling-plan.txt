@@ -1,0 +1,274 @@
+Neoplasm LCA/MRCA sampling: research and implementation plan
+Date: 2026-10-09
+Branch inspected: neoplasm_AI, commit 24c57d210
+Scope: planning only; no Java, XML, or generator changes.
+
+Recommendation
+--------------
+Sample the LCA position as a fraction of the available origin-to-MRCA
+interval, deriving its height and stem length from that fraction and the
+current tree root. Combine a local fraction move with a joint tree/stem scale
+move. This directly implements the two proposed types of movement, but they
+must have different transformations: holding the fraction fixed during a tree
+move does NOT scale the LCA-MRCA branch with the tree.
+
+This is the preferred robust design, not a demonstrated mixing improvement.
+It needs a modest, scoped timing-model integration, rather than just XML
+operator changes. A smaller height-based alternative is described below.
+Benchmark both before claiming which has the best effective sampling rate.
+
+Coordinates and fixed total time
+-------------------------------
+Use BEAST's backwards heights, with the latest sampling time at height zero:
+
+  origin (H) -- founder phase A --> LCA (C) -- stem B --> MRCA (R) --> tips
+
+H is fixed originHeight; C is cenancestorHeight; R is the current tree-root
+height. Therefore A = H-C, B = C-R, and A+B+R = H. For serial samples, a tip
+at height h has total origin-to-tip duration H-h, not H. All quantities must
+use the same units and time origin. H remains the already implemented age-
+inferred or explicitly supplied origin height; do not scale the sample ages.
+
+Define q = (C-R)/(H-R), the fraction measured FROM THE MRCA towards the origin:
+
+  D = H-R
+  B = q D
+  A = (1-q) D
+  C = R + q D
+
+Thus q=0 places the LCA at the MRCA; q=1 places it at the origin (the old fixed-
+LCA location). The forward-time fraction from the origin is 1-q. Make this
+orientation explicit in XML documentation to avoid ambiguity.
+
+With R<H and 0<=q<=1, both new branches are nonnegative by construction.
+The root must still obey its children/tip constraints and R<H. The degenerate
+R=H case has no interval and q is undefined: reject it in the sampled-fraction
+mode. Legacy fixed-height analyses can retain their existing representation.
+Zero A or B can be supported as endpoints if transition handling allows it;
+do not add an arbitrary positive epsilon or silently clamp proposals.
+
+What the current implementation does
+------------------------------------
+The following findings refer to the local fork, not assumptions about newer
+BEAST versions. Paths are relative to PHYFUM/.
+
+* src/dr/evomodel/treelikelihood/CenancestorTreeLikelihood.java
+  Constructor (~98), updateCenancestorPosition/Branch/Height (~360-375), and
+  variable/tree event handlers (~395-445): heightRules=true keeps C as the
+  independent coordinate and quietly derives B=C-R. The other mode keeps B
+  independent and quietly derives C=R+B. Neither enforces the full ordering
+  R<=C<=H during every proposal; the likelihood does not currently own H.
+  A root increase can make B negative in height mode, or C exceed H in branch
+  mode. Static nonnegative parameter bounds do not solve these dependencies.
+
+* The same likelihood's traversal (~660-706) checks negative ordinary branch
+  times with a RuntimeException, but the special root-to-LCA transition does
+  not have the equivalent explicit check. The new founder model validates
+  its duration and throws IllegalArgumentException if it is negative. These
+  paths must not be relied upon as normal MCMC support rejection.
+
+* src/dr/evomodel/tree/TreeModel.java, NodeHeightBounds (~1421): the root has
+  an infinite upper bound; other node heights are bounded by their parents.
+  src/dr/evomodel/operators/SubtreeSlideOperator.java can change root height
+  and root identity, not just internal branches. Adding an operator only for
+  the current root-height parameter would not cover the whole schedule.
+
+* src/dr/evomodelxml/substmodel/FlipFlopNeoplasmCenancestorFrequencyParser.java
+  (~38-49) currently creates H locally when inferring ages and derives the
+  founder duration as H-C. A shared timing model must expose/use that SAME H
+  for frequencies, tree support, and operators, without independent inference
+  or a cyclic frequency-model/tree-likelihood dependency.
+
+* examples/release/flipflop/sim1Absolute.xml has heightRules=true, root scaling,
+  subtree-slide and topology moves, and an upDownOperator coupling rates to
+  all internal heights. Its uniform luca_branch prior spans [0,50]. That is
+  not automatically a uniform conditional fraction prior.
+
+Proposed move 1: local LCA allocation
+-----------------------------------
+At fixed tree and H, propose q' by a symmetric reflected random walk on [0,1]:
+q' = reflect(q + U[-w,w]). Recompute C, A, and B from q'. The log Hastings
+correction is zero. Tune w and the operator weight using pilot chains.
+
+The local RandomWalkOperator already implements reflecting bounds with zero
+log Hastings correction; it can be reused for a genuine q parameter. An
+occasional uniform redraw of q is another symmetric proposal, not a Gibbs
+draw from its conditional posterior. Retain local moves even when including
+joint scale moves, so the allocation can change independently of the tree.
+
+When an existing tree operator changes R to R', leave q unchanged and derive
+C'=R'+q(H-R'). This automatically transports the LCA for root-height changes
+and root-changing topology moves. In native (tree,q) coordinates, the existing
+tree proposal's Hastings correction is unchanged. Reject R'>=H centrally.
+
+Example: H=45, R=20, q=0.4 gives C=30, B=10, A=15. If R becomes 25 at fixed q,
+C becomes 33, B becomes 8, and A becomes 12. This is interval allocation,
+not proportional scaling of the original stem.
+
+Proposed move 2: joint tree and stem scaling
+------------------------------------------
+Let s be the multiplier on all K free internal-node heights, including R.
+The requested joint move is:
+
+  h_i' = s h_i; R' = s R; B' = s B; C' = s C
+  A' = H-s C
+  q' = s q (H-R)/(H-s R)
+
+H and tip dates stay fixed. Check R'<H, C'<=H, and all node/child constraints
+before accepting the proposed state for likelihood calculation. In particular,
+an expansion past the origin must be rejected: fixed total time cannot allow
+unlimited expansion. With dated tips, scaling internal absolute heights is
+not a uniform scaling of every terminal branch; respect fixed tip heights.
+
+For H=45, R=20, C=30 and s=1.1, this produces R'=22, C'=33, B'=11, A'=12,
+and q'=11/23. Simply scaling q, or leaving q unchanged, gives the wrong move.
+
+For a BEAST-style draw s ~ Uniform[a,1/a], the proposed pure time-scaling
+operator in (h_1,...,h_K,q) coordinates must return:
+
+  log Hastings = (K-1) log(s) + log((H-R)/(H-s R)).
+
+Derivation: the state transformation determinant at fixed s is
+s^(K+1) (H-R)/(H-s R). Augmenting the reversible map with s'=1/s adds s^-2;
+the uniform forward/reverse scale densities cancel. Do not count C or B as
+additional independent parameters when q is the state variable. This formula
+assumes exactly the specified draw and variables; a log-uniform draw, a
+state-truncated scale interval, or rate compensation needs its own correction.
+Initially reject out-of-support draws rather than resampling until valid,
+which would introduce a state-dependent proposal normalization.
+
+The existing UpDownOperator uses a uniform multiplier, sequentially scales
+its groups, and returns (nUp-nDown-2)*log(scale). It can inspire the new
+operator, but cannot directly scale a derived C or B in fraction mode.
+Its current example also puts TIMES on the DOWN side: its sampled multiplier
+is then the reciprocal of s above. Do not reuse the formula with that
+convention without transforming the proposal density accordingly.
+
+Priors: distinguish better proposals from a different model
+---------------------------------------------------------
+Changing the coordinate must not silently change the target distribution.
+For an existing joint density pi(tree,C), the equivalent density is:
+
+  pi_q(tree,q) = pi(tree, R+q(H-R)) * (H-R).
+
+The same factor applies when preserving a density on B. Add log(H-R) once
+to the target for this conversion, not to every operator. Priors on derived
+C/B alone do not supply the Jacobian automatically. Keep any existing branch
+prior restrictions, including its upper bound, in addition to timing support.
+
+A deliberately uniform conditional C in [R,H] has density 1/(H-R), which
+cancels this factor and corresponds to uniform q. Conversely, a constant
+joint density in B with only support truncation is not the same prior: in q
+coordinates its density is proportional to H-R, affecting root-height mass.
+A Beta prior on q is a possible biological modelling choice, not a sampling
+optimization. Recommendation: preserve the chosen existing target for the
+first operator comparison; decide any new allocation prior separately.
+
+Smaller alternative without native q
+-----------------------------------
+Keep C independent (heightRules=true). At fixed R, compute q temporarily,
+make the reflected fraction proposal, and write C'=R+q'(H-R). This is
+symmetric in C as well, because D is unchanged; its log Hastings is zero.
+No prior-coordinate Jacobian is needed because C remains the sampled state.
+
+For a joint scale, group C with all internal heights, not B: C'=sC and R'=sR
+already imply B'=sB. This can potentially reuse a shared-scale operator, but
+requires careful event ordering and a final support check. Never independently
+operate B in heightRules mode, or scale both C and B and count both dimensions.
+
+Ordinary tree moves would still hold C fixed and reject R'>C. This is the
+least invasive prototype, but retains a bottleneck when the stem is short.
+Transporting C at fixed q for all root-changing operators could fix that,
+but would require adding log((H-R')/(H-R)) to their original Hastings ratios
+in C coordinates. Updating C quietly without that correction would be wrong.
+Native q avoids having to retrofit that correction into each tree operator.
+
+Why rate/time compensation is not an exact symmetry here
+--------------------------------------------------------
+Scaling the post-LCA tree and stem by s and shared absolute rates by 1/s
+preserves their rate-times-duration products for contemporaneous tips and
+matching, unnormalized rate models. But the founder product changes from
+r(H-C) to (r/s)(H-sC) = r(H/s-C). The fixed origin breaks the old full
+rate/time compensation. Dated tips, rate normalization, or clock multipliers
+can break additional invariances. Recompute the founder frequencies, never
+assume this joint proposal leaves the full likelihood unchanged.
+
+A rate-compensated variant may still improve mixing, but benchmark it as an
+additional move after the pure time move works. Count and scale each actual
+independent rate Parameter once: default mu/nu and gamma/zeta ties share the
+same objects. Keep methylatedProportion or the three origin frequencies live
+and unchanged by these timing moves; their current semantics need no change.
+
+Implementation scope for a later task
+------------------------------------
+1. Add a neoplasm-specific timing model/parser holding H, q, and the tree,
+   exposing read-only derived C, A, B. Use one canonical timing source for
+   the likelihood, founder frequencies, operators, priors, and logging.
+   Resolve inferred H once. Keep existing height/branch modes compatible;
+   reject ambiguous combinations with fraction mode.
+2. Add an explicit derived-timing mode to CenancestorTreeLikelihood and its
+   parser. Existing updateCenancestorPosition must not overwrite derived
+   parameters. Respond to tree, root-identity, and q changes, invalidating
+   both founder frequencies and the special stem transition as appropriate.
+3. Guard support before evaluating transitions/frequencies: reject invalid
+   proposed states with -infinity or OperatorFailedException, while invalid
+   initial XML remains a clear configuration error. Bounds are useful for
+   early rejection, but cannot be the only guard for topology moves.
+4. Reuse the existing reflected random walk for q; add a joint-scale operator
+   and parser. Validate the complete proposed state; batch notifications or
+   defer dependent evaluation so partial updates cannot throw exceptions.
+   Verify rejected proposals restore both the tree and timing-derived state.
+5. Supply the explicit prior-coordinate adjustment if preserving a C/B prior;
+   log H,R,C,A,B,q and operator diagnostics. XML generator work remains later.
+
+No core BEAST edits should be necessary: add PHYFUM classes and minimally
+extend the already modified likelihood/parser and new neoplasm code.
+git diff 056fb40..HEAD confirms that TreeModel, ScaleOperator, UpDownOperator,
+RandomWalkOperator and SubtreeSlideOperator are unchanged from that baseline;
+project instructions prohibit editing them without specific permission.
+
+Validation and comparison plan
+------------------------------
+* Unit tests: formulas, inverse maps, Hastings factors, endpoints, R close to
+  H, rejected origin crossings, dated tips, shared rate aliases, initial-state
+  validation, and exact store/restore after both accepted/rejected proposals.
+* Integration: every root-changing scheduled operator, including subtree-slide
+  root replacement, must update the stem and founder phase correctly. Compare
+  incremental likelihoods with a fully recomputed likelihood after moves.
+* Prior-only chains against analytically normalized toy targets: verify that
+  C/B and q parameterizations yield identical distributions when the Jacobian
+  is included. Acceptance rates alone cannot reveal a biased sampler.
+* In the S=1-equivalent case with exactly matching pre/post generators and
+  rate scaling, exp(QA)exp(QB)=exp(Q(A+B)). The allocation then has no sequence-
+  likelihood information of its own. Test this with a three-state reference;
+  do not force the general niche code through its S-1 denominator. For S>1,
+  data inform the allocation through the difference between the two phases;
+  weak identifiability may remain and cannot be repaired by an operator.
+* Compare height-based guarded baseline, native q with local moves, q plus
+  joint scaling, and optionally rate-compensated scaling. Use multiple seeds,
+  equal wall time, and identical targets/data. Measure ESS per second for
+  A,B,C,R,q and rates, cross-chain agreement, correlations, and the fraction
+  of proposals rejected for support violations. Tune weights/windows in
+  pilots rather than claiming a universally optimal acceptance target.
+
+Checks performed for this planning entry
+---------------------------------------
+Read the local models, parsers, tree bounds, operators, and example schedule.
+Independently checked the joint transformation numerically in a two-internal-
+height toy example (H=45, heights=10/20, q=0.4, s=1.1). Finite-difference
+determinant: 1.446739130255; analytic: 1.446739130435. Applying the inverse
+recovers the original state. A grid of 80 proposed transforms covering near-
+origin roots, q endpoints, contractions and expansions produced 55 supported
+and 25 rejected proposals; maximum inverse error was 7.4e-15. These are
+algebra checks, not a mixing benchmark or tests of a new implementation.
+No implementation was changed and the Java test suite was not rerun.
+
+External reference
+------------------
+The official BEAST XML reference documents the reflected random-walk option
+and reciprocal up/down scaling convention. Local source inspection above is
+the authority for this older fork; the coordinate/Jacobian derivations in this
+entry are specific to the proposed neoplasm design, not claims from the docs.
+
+https://beast.community/xml_reference
+Sections: <randomWalkOperator> and <upDownOperator> (accessed 2026-10-09).
