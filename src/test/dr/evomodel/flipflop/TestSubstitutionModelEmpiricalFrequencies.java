@@ -1,4 +1,4 @@
-package dr.evomodel.flipflop;
+package test.dr.evomodel.flipflop;
 
 
 import dr.evolution.datatype.DataType;

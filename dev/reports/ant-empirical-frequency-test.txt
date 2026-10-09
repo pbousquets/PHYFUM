@@ -1,0 +1,17 @@
+Ant empirical-frequency test discovery fix
+Date: 2026-10-08
+
+Ant's junit_flipflop target derives test class names from paths under src/.
+TestSubstitutionModelEmpiricalFrequencies.java declared dr.evomodel.flipflop,
+but its source path required test.dr.evomodel.flipflop. This caused the
+ClassNotFoundException reported during the four-rate model implementation.
+
+Corrected the package declaration to test.dr.evomodel.flipflop, matching
+the source path and neighboring test classes. No build or test logic changed.
+
+Validation from PHYFUM:
+  JAVA_HOME=/Library/Java/JavaVirtualMachines/jdk-18.0.1.1.jdk/Contents/Home ant compile-all junit_flipflop
+
+Compilation succeeded. Ant discovered and ran all seven suites, including
+TestSubstitutionModelEmpiricalFrequencies: 14 tests, zero failures or errors.
+Verified the generated JUnit XML reports and git diff --check.
