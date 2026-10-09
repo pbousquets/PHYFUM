@@ -1,0 +1,146 @@
+Neoplasm cenancestor frequency model
+Date: 2026-10-08
+Branch: neoplasm
+Base: local master, d17339e364c0340e5537ab8ce4e8e4852edd6aa4
+
+Implementation
+--------------
+Added FlipFlopNeoplasmCenancestorFrequencyModel, extending the existing
+AbstractGeneralFrequencyModel interface used by CenancestorTreeLikelihood.
+It evolves a three-state founder-cell distribution for a specified duration,
+then expands the resulting probabilities to PHYFUM's niche state space.
+This avoids the S-1 denominator in the general substitution model at S=1.
+There is no cell replacement in this single-cell phase.
+
+Added and registered the flipflopNeoplasmCenancestorFrequency XML parser.
+The only change to the existing likelihood parser is an optional syntax rule
+for AbstractGeneralFrequencyModel, matching the type it already consumes.
+The likelihood computation itself requires no changes.
+
+Matrix and state conventions
+----------------------------
+Origin frequencies use (U,H,M): fully unmethylated, hemimethylated, and fully
+methylated cells. Retaining PHYFUM's rate definitions, the row-source generator is:
+
+        U           H             M
+  U   -2*mu       2*mu            0
+  H    zeta     -(nu+zeta)        nu
+  M     0        2*gamma       -2*gamma
+
+The matrix supplied in the request is its column-source equivalent when
+states are ordered (M,H,U). Both state order and orientation must be accounted
+for; transposing alone would reverse the rate meanings for a (U,H,M) vector.
+
+The evolved distribution is p(t) = p(0) exp(Q*t). The implementation uses
+uniformization with scaling and squaring, which also handles zero rates,
+absorbing states, repeated eigenvalues, and long durations. Rates are absolute
+per unit of elapsed time; neither flux normalization nor a tree-clock multiplier
+is applied during this phase.
+
+PHYFUM enumerates states (k,m) with m outermost and k innermost. Error-free
+replication of the founder yields only the clonal states:
+  U -> (0,0), index 0
+  H -> (S,0), index S
+  M -> (0,S), index (S+1)*(S+2)/2 - 1
+All other niche states have frequency zero at the cenancestor. In particular,
+an H founder produces S hemimethylated cells, not a mixture of U and M cells.
+
+Time coordinates and parameter sharing
+--------------------------------------
+Choose exactly one XML time specification:
+  1. originHeight and cenancestorHeight (scalar parameters). Duration is
+     originHeight - cenancestorHeight, using BEAST's backwards height axis.
+     For contemporaneous samples aged 45 from origin time zero, originHeight=45;
+     a cenancestorHeight of 40 gives five units of founder-cell evolution.
+  2. elapsedTime (scalar parameter), when the nonnegative duration is supplied
+     directly, possibly via an existing derived parameter.
+
+Share the same cenancestorHeight parameter with the tree likelihood using
+idref. No cyclic model dependency is needed. Heights/proposals must keep the
+cenancestor between the tree root and the origin. A fixed origin at 45, for
+example, allows an upper bound of 45 on the cenancestor height. Invalid negative
+durations are rejected, not clipped. For serial samples, express the origin
+height in the same backwards coordinate system as the tree.
+
+Parameters are registered for model-change notifications and MCMC restoration.
+Frequencies are calculated from current values on each request, also observing
+the quiet height updates made by branchRules mode. The output is derived and
+cannot be set via setFrequency; change the origin distribution instead.
+
+XML example fragment (the referenced alignment and rates must already exist)
+---------------------------------------------------------------------------
+  <flipflopNeoplasmCenancestorFrequency id="neoplasmFrequencies">
+      <alignment idref="alignment"/>
+      <frequencies>
+          <parameter id="origin.frequencies" value="0.5 0 0.5"/>
+      </frequencies>
+      <originHeight>
+          <parameter id="origin.height" value="45"/>
+      </originHeight>
+      <cenancestorHeight>
+          <parameter id="luca_height" value="40" lower="0" upper="45"/>
+      </cenancestorHeight>
+      <mu><parameter idref="flipflop.mu"/></mu>
+      <gamma><parameter idref="flipflop.gamma"/></gamma>
+      <nu><parameter id="neoplasm.nu" value="0.04" lower="0"/></nu>
+      <zeta><parameter id="neoplasm.zeta" value="0.08" lower="0"/></zeta>
+  </flipflopNeoplasmCenancestorFrequency>
+
+Inside the existing cenancestorTreeLikelihood, use:
+  <flipflopNeoplasmCenancestorFrequency idref="neoplasmFrequencies"/>
+  <cenancestorHeight><parameter idref="luca_height"/></cenancestorHeight>
+
+Both nu and zeta are individually optional; omission shares the actual mu or
+gamma parameter respectively. No lambda is required by the founder model.
+Three origin frequencies are required unless a methylated-proportion input is
+used. normalize="true" may normalize nonnegative frequencies with positive sum.
+
+Methylated-proportion compatibility
+----------------------------------
+The attribute methylatedProportion="p" initializes origin frequencies (1-p,0,p),
+including endpoints p=0 and p=1. As in the existing parser, it may initialize a
+supplied frequency parameter, resizing that parameter to three elements.
+The frequencies element can also be omitted when the attribute is supplied.
+
+Alternatively use a live scalar parameter:
+  <methylatedProportion><parameter id="origin.p" value="0.5" lower="0" upper="1"/></methylatedProportion>
+This replaces the frequencies element and cannot be combined with the attribute.
+Changes to this parameter update the origin distribution and likelihood.
+
+Scope
+-----
+This branch starts from master as requested. Previous four-rate model/generator
+commits and the Ant test-package fix remain on four-rate-params_AI. The general
+post-cenancestor substitution model on neoplasm therefore retains master's
+original tied rates. Independent nu/zeta here govern the new founder-cell phase.
+No XML generator, simulator, original example, or reference repository was edited.
+
+Validation
+----------
+Compiled all Java sources into a fresh temporary build, avoiding stale classes
+from the previous branch:
+  JAVA_HOME=/Library/Java/JavaVirtualMachines/jdk-18.0.1.1.jdk/Contents/Home ant \
+    -Dbuild=/private/tmp/phyfum-neoplasm.4NhFor/build compile-all
+
+Ran all existing FlipFlop tests and both new test classes via JUnitCore:
+22 tests passed, including 13 new tests. Coverage includes analytic independent-
+allele results for tied rates, asymmetric rate direction, clonal expansion for
+S=1/2/5/10, zero time/rates, absorbing states, repeated eigenvalues, stationary
+limits, very large finite inputs, parameter changes and restoration, strict
+XML parsing and invalid input rejection, proportions, and optional rate ties.
+Actual CenancestorTreeLikelihood integration checks cover founder-only rate
+changes, root distributions, origin/cenancestor/branch/tree-height proposals,
+and rejection/restoration in both heightRules and branchRules modes.
+
+The empirical-frequency test was invoked under its package on master,
+dr.evomodel.flipflop.TestSubstitutionModelEmpiricalFrequencies. Its existing
+Ant discovery mismatch was not reintroduced or modified by this work.
+
+A temporary copy of sim1Absolute.xml using the registered new parser completed
+500 MCMC steps with dr.app.beast.BeastMain -beagle_off -seed 12345. This used
+origin frequencies 0.5,0,0.5, origin height 45, initial cenancestor height 40,
+and independent founder nu=0.04 and zeta=0.08. Operators proposed cenancestor
+height, nu, and zeta changes successfully. This checks execution, not convergence.
+The temporary XML, build, and run outputs are in /private/tmp/phyfum-neoplasm.4NhFor/.
+
+git diff --check passed. Nothing was pushed.

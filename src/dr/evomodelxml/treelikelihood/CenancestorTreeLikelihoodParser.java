@@ -137,6 +137,7 @@ public class CenancestorTreeLikelihoodParser extends AbstractXMLObjectParser {
             new ElementRule(CenancestorBranchRateModel.class, true),
             new ElementRule(TipStatesModel.class, true),
             new ElementRule(FrequencyModel.class, true),
+            new ElementRule(AbstractGeneralFrequencyModel.class, true),
             new ElementRule(CENANCESTOR_HEIGHT,
                     new XMLSyntaxRule[]{new ElementRule(Parameter.class)},true),
             new ElementRule(CENANCESTOR_BRANCH,
