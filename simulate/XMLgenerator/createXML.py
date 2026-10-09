@@ -197,6 +197,12 @@ class createXML:
                     self.doc.stag("parameter", idref="treeModel")
                 with self.tag("scaleOperator", scaleFactor="0.25", weight="3.0"):
                     self.doc.stag("parameter", idref="treeModel.rootHeight")
+                # The root parameter supplies the live oldest-child lower bound.
+                # Reflect at the fixed LCA age as well; never operate on luca_branch.
+                self.newSection("Reflected root-height move between the oldest child and the fixed LCA", addNewline=False)
+                with self.tag("randomWalkOperator", windowSize="2.5", weight="3.0",
+                              boundaryCondition="reflecting", upper=f"{self.age}", autoOptimize="true"):
+                    self.doc.stag("parameter", idref="treeModel.rootHeight")
                 with self.tag("uniformOperator", weight="30.0"):
                     self.doc.stag("parameter", idref="treeModel.internalNodeHeights")
                 with self.tag("upDownOperator", scaleFactor="0.25", weight="3.0"):

@@ -92,7 +92,13 @@ class FourRateXMLTest(unittest.TestCase):
         for tag in ("log", "logTree"):
             self.assertTrue(modified.find(f"mcmc/{tag}[@fileName]").get("fileName")
                             .startswith("sim1AbsoluteFourRates."))
-        # Removing the new parameters and wiring must recover the original analysis.
+        # The reflected root move is the only additional non-rate change.
+        operators = modified.find("operators")
+        reflected = operators.findall("randomWalkOperator")
+        self.assertEqual(len(reflected), 1)
+        self.assertEqual(reflected[0].find("parameter").get("idref"), "treeModel.rootHeight")
+        operators.remove(reflected[0])
+        # Removing the new move, parameters and wiring recovers the original analysis.
         model = modified.find("flipflopModel")
         for rate in ("nu", "zeta"):
             model.remove(model.find(rate))

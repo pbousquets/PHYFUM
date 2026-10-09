@@ -1,0 +1,110 @@
+Reflected MRCA-height proposal for the fixed-LCA model
+Date: 2026-10-09
+Branch: reflected-root-height_AI
+Base: four-rate-params_AI head, 7bf5b2098
+
+Implementation
+--------------
+Added a reflected root-height random walk to the XML generator's operator
+schedule, in both the original tied-rate and four-independent-rate modes.
+Added the same operator to examples/release/flipflop/sim1AbsoluteFourRates.xml.
+The original sim1Absolute.xml is unchanged.
+
+The existing BEAST RandomWalkOperator and parser already implement everything
+needed, so no production Java or core BEAST files were changed. New Java
+regression tests exercise that operator in the fixed-LCA PHYFUM setting.
+No neoplasm changes are included: this branch starts directly from the
+requested four-rate branch, not neoplasm_AI.
+
+XML configuration (inside <operators>, example with fixed LCA height 45)
+----------------------------------------------------------------------
+  <randomWalkOperator windowSize="2.5" weight="3.0"
+                      boundaryCondition="reflecting" upper="45.0"
+                      autoOptimize="true">
+      <parameter idref="treeModel.rootHeight"/>
+  </randomWalkOperator>
+
+The generator uses the same age for this upper limit and luca_height. There
+is deliberately no explicit lower attribute: TreeModel's root parameter
+supplies the current maximum of its two child heights. TreeModel preserves
+the root parameter's identity when a topology edit replaces the root node,
+so both the target and its lower bound continue to refer to the current root.
+
+Only the root height changes. With H the fixed LCA height, R the root height,
+and L the oldest-child height, the proposal reflects R+U[-w,w] into [L,H].
+Multiple boundary crossings are reflected, not clipped or resampled. The
+interval is unchanged by this root-only move, so its log Hastings correction
+is zero. The existing heightRules=true likelihood derives luca_branch=H-R.
+Neither luca_branch nor luca_height receives an independent operator.
+
+The initial window is 2.5 time units (years in generated XML), the weight is
+3, and automatic tuning is enabled. These are initial settings, not an
+empirically optimized recommendation. The original root scaler, tree/topology
+operators, rate/tree up-down move, and every prior are retained unchanged.
+
+Scope and assumptions
+---------------------
+This configuration is for a fixed LCA with a valid initial tree and a
+nondegenerate interval L<H. It is not a solution for a moving LCA: a literal
+upper limit would not follow a sampled cenancestor height. If the fixed age
+is edited manually, update both luca_height and the operator's upper limit.
+The XML generator keeps them synchronized automatically.
+
+The move does not add a global root bound to other operators; their existing
+stem prior still rejects roots older than the fixed LCA. No new demographic
+prior or other model changes were made. No ESS or ESS-per-second comparison
+was performed, and the short runs below do not establish convergence.
+
+Regression coverage
+-------------------
+src/test/dr/evomodel/flipflop/TestReflectedRootHeightOperator.java:
+  - Strict XML parsing of the reused operator and root parameter reference.
+  - Reflection at both ends, including endpoint starts and many crossings;
+    compared against an independent triangular-wave expression.
+  - Zero log Hastings correction and valid tree/root bounds.
+  - Live lower bounds after child-height changes.
+  - Root replacement by a valid topology rotation: the operator continues
+    moving the new root and leaves the former root's height unchanged.
+  - A narrow positive interval with dated tips; tip heights remain fixed.
+  - Real CenancestorTreeLikelihood integration: immediate derived-stem
+    updates, fixed LCA, finite likelihoods, agreement with full recomputation,
+    and state restoration/acceptance.
+
+simulate/XMLgenerator/test_reflected_root.py:
+  - Correct upper limit across several ages and both rate modes.
+  - Dynamic lower bound is not overridden.
+  - Window, weight, reflection, automatic tuning, and parameter reference.
+  - Preservation of existing operators and absence of LCA/stem operators.
+  - Equivalent wiring in the four-rate example.
+
+Updated the existing example-equivalence test to allow precisely the new
+root move in addition to the previously documented four-rate differences.
+
+Validation
+----------
+Used a fresh temporary build to exclude stale classes from neoplasm_AI:
+
+  JAVA_HOME=/Library/Java/JavaVirtualMachines/jdk-18.0.1.1.jdk/Contents/Home ant \
+    -Dbuild=/private/tmp/phyfum-reflected-root.cqoWx3/build compile-all junit_flipflop
+
+All 18 Java tests across eight suites passed (including four new tests).
+Checked the JUnit XML reports, not just Ant's build-success message.
+
+  /private/tmp/phyfum-xml-check.tyuVOj/venv/bin/python -m unittest discover \
+    -s simulate/XMLgenerator -p 'test_*.py' -v
+
+All six Python tests passed.
+
+Completed three 500-step BeastMain runs with -beagle_off -seed 12345:
+  - CLI-generated tied-rate XML using test.csv.
+  - CLI-generated four-rate XML using test.csv, nu=0.04, zeta=0.08.
+  - A temporary shortened copy of sim1AbsoluteFourRates.xml.
+All reached state 500 with finite posterior/prior/likelihood values. Each
+operator report records proposals and accepted moves for the reflected root
+operator. These are execution checks only, not performance comparisons.
+The committed example retains its original chain length and log intervals.
+
+Temporary builds, XMLs, and smoke-run outputs:
+  /private/tmp/phyfum-reflected-root.cqoWx3/
+
+git diff --check passed. Only PHYFUM was modified; nothing was pushed.

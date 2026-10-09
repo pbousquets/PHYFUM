@@ -235,6 +235,10 @@
 		<scaleOperator scaleFactor="0.25" weight="3.0">
 			<parameter idref="treeModel.rootHeight"/>
 		</scaleOperator>
+		<!-- Root bounds: live oldest-child height below, fixed LCA height above. -->
+		<randomWalkOperator windowSize="2.5" weight="3.0" boundaryCondition="reflecting" upper="45.0" autoOptimize="true">
+			<parameter idref="treeModel.rootHeight"/>
+		</randomWalkOperator>
 		<uniformOperator weight="30.0">
 			<parameter idref="treeModel.internalNodeHeights"/>
 		</uniformOperator>
