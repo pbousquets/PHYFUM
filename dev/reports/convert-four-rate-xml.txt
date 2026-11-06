@@ -1,0 +1,56 @@
+Existing XML conversion to four independent rates
+Date: 2026-11-06
+Branch: convert-four-rate-xml_AI
+
+Script: simulate/XMLgenerator/convert_to_four_rates.py
+Dependencies: Python 3.8+ standard library only.
+
+Usage from PHYFUM:
+  python3 simulate/XMLgenerator/convert_to_four_rates.py analysis.xml
+    Creates analysis_4param.xml.
+  python3 simulate/XMLgenerator/convert_to_four_rates.py analysis.xml --suffix _four
+    Creates analysis_four.xml.
+  python3 simulate/XMLgenerator/convert_to_four_rates.py analysis.xml chosen.xml --suffix _four
+    Creates exactly chosen.xml; analysis filenames still receive _four.
+
+The suffix is inserted before the final extension of every fileName and
+operatorAnalysis attribute. Directories are preserved. This includes .ops,
+.log and .trees outputs, MLE logs, and corresponding analysis readers.
+For example results/run.MLE.log becomes results/run.MLE_4param.log.
+
+Nu copies mu's initial value and bounds into an independent parameter; zeta
+copies gamma's. The converter clones each source rate's actual scale operator
+and prior, including customized tuning and prior settings. It adds references
+to the new rates to joint upDownOperator groups and existing rate log entries
+(including columns). Cloned operators/priors with IDs receive distinct IDs.
+Source rate definitions referenced through idref are resolved before copying.
+Conventional flipflop.mu/flipflop.gamma IDs produce flipflop.nu/flipflop.zeta;
+custom IDs are supported too. XML comments and sequence content are preserved,
+though XML serialization can normalize attribute quoting and empty-tag spacing.
+
+The converter expects one defined flipflopModel and the generator's scalar
+parameter, scaleOperator and prior structure. It rejects already expanded XML,
+missing priors/operators, ID collisions, and nonpositive/nonfinite initial
+values (which cannot initialize the new scale proposals correctly). Errors
+are reported before writing output. Existing output XMLs and the source XML
+are protected from overwrite. Empty suffixes and path separators in suffixes
+are rejected.
+
+Validation:
+  PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover \
+    -s simulate/XMLgenerator -p test_convert_to_four_rates.py -v
+All five standard-library tests passed. They check customized settings,
+operator/prior/log wiring, independent parameters, reference resolution,
+unique IDs, preserved alignment content and comments, suffixes including MLE
+readers, default/explicit CLI output paths, and invalid/overwrite cases.
+
+Converted examples/release/flipflop/sim1Absolute.xml and ran a temporary copy
+with 150 MCMC iterations and log interval 25 through dr.app.beast.BeastMain
+using JDK 18, -beagle_off and -seed 12345. The run completed at state 150 with
+finite posterior, prior and likelihood. The output log contains independent
+nu and zeta columns, and the operator report includes both scale proposals
+and the expanded joint rate/tree-time operator. The .ops/.log/.trees filenames
+all carry _4param. This checks execution, not convergence.
+Temporary artifacts: /private/tmp/phyfum-convert-check.Rm2McY/.
+
+git diff --check passed. No existing source files were modified. Nothing pushed.
