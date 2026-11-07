@@ -13,6 +13,30 @@ from pathlib import Path
 import xml.etree.ElementTree as ET
 
 
+class CommentPreservingTreeBuilder(ET.TreeBuilder):
+    """Keep comments on Python versions predating TreeBuilder(insert_comments=...)."""
+
+    def __init__(self):
+        super().__init__()
+        self.depth = 0
+
+    def start(self, tag, attrs):
+        self.depth += 1
+        return super().start(tag, attrs)
+
+    def end(self, tag):
+        element = super().end(tag)
+        self.depth -= 1
+        return element
+
+    def comment(self, text):
+        # ElementTree serializes a single root, so retain comments inside it only.
+        if self.depth:
+            super().start(ET.Comment, {})
+            super().data(text)
+            super().end(ET.Comment)
+
+
 def suffixed_name(name, suffix):
     """Insert the suffix before the final extension, preserving the directory."""
     path = Path(name)
@@ -151,7 +175,7 @@ def main(argv=None):
             raise ValueError("Output XML must differ from the input XML")
         # Preserve comments, including commented alternative model configurations.
         tree = ET.parse(args.input_xml, parser=ET.XMLParser(
-            target=ET.TreeBuilder(insert_comments=True)))
+            target=CommentPreservingTreeBuilder()))
         convert_tree(tree, args.suffix)
         # Exclusive creation protects existing analyses and earlier conversion results.
         with output.open("xb") as stream:

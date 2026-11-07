@@ -7,7 +7,7 @@ from tempfile import TemporaryDirectory
 import unittest
 import xml.etree.ElementTree as ET
 
-from convert_to_four_rates import convert_tree, suffixed_name
+from convert_to_four_rates import CommentPreservingTreeBuilder, convert_tree, suffixed_name
 
 
 SCRIPT = Path(__file__).with_name("convert_to_four_rates.py")
@@ -15,6 +15,12 @@ EXAMPLE = Path(__file__).resolve().parents[2] / "examples/release/flipflop/sim1A
 
 
 class ConvertFourRatesTest(unittest.TestCase):
+    def test_comments_without_python38_treebuilder_option(self):
+        xml = "<!--before--><beast>text<!--inside--><child/>tail<!--last--></beast><!--after-->"
+        root = ET.fromstring(xml, parser=ET.XMLParser(target=CommentPreservingTreeBuilder()))
+        self.assertEqual(ET.tostring(root, encoding="unicode"),
+                         "<beast>text<!--inside--><child />tail<!--last--></beast>")
+
     def test_complete_conversion_and_custom_settings(self):
         tree = ET.parse(EXAMPLE)
         root = tree.getroot()
@@ -108,7 +114,8 @@ class ConvertFourRatesTest(unittest.TestCase):
 
             def run(*args):
                 return subprocess.run([sys.executable, str(SCRIPT), str(source), *map(str, args)],
-                                      capture_output=True, text=True)
+                                      stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                      universal_newlines=True)
 
             result = run()
             self.assertEqual(result.returncode, 0, result.stderr)

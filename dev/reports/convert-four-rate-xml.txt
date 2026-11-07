@@ -3,7 +3,7 @@ Date: 2026-11-06
 Branch: convert-four-rate-xml_AI
 
 Script: simulate/XMLgenerator/convert_to_four_rates.py
-Dependencies: Python 3.8+ standard library only.
+Dependencies: Python 3.6+ standard library only (compatibility fix: 2026-11-07).
 
 Usage from PHYFUM:
   python3 simulate/XMLgenerator/convert_to_four_rates.py analysis.xml
@@ -54,3 +54,18 @@ all carry _4param. This checks execution, not convergence.
 Temporary artifacts: /private/tmp/phyfum-convert-check.Rm2McY/.
 
 git diff --check passed. No existing source files were modified. Nothing pushed.
+
+Compatibility fix, 2026-11-07 (four-rate-params_AI)
+-------------------------------------------------
+The insert_comments keyword was introduced in Python 3.8; older interpreters
+raised TypeError when constructing the XML parser. Replaced that keyword with
+a TreeBuilder subclass using start/data/end callbacks to preserve comments
+inside the root, including commented alternative configurations. Comments
+outside the root are ignored, matching ElementTree's previous behavior.
+The converter now uses standard-library interfaces available in Python 3.6.
+Also replaced Python 3.7-only subprocess test arguments with older equivalents.
+
+All six converter tests passed, including a new comment/text preservation
+regression and the existing full CLI conversion tests. git diff --check passed.
+These checks ran on the installed Python; Python 3.6/3.7 were not available
+for direct runtime verification. No dependencies added.
