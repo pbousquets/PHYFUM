@@ -1,0 +1,57 @@
+Add MRCA sampling to an existing generated XML
+Date: 2026-11-09
+Branch: add-mrca-sampling-script_AI
+
+Added simulate/XMLgenerator/add_mrca_sampling.py, a standalone script using
+only the Python standard library and APIs available in Python 3.6.8.
+
+Usage from PHYFUM:
+  python3 simulate/XMLgenerator/add_mrca_sampling.py analysis.xml
+  python3 simulate/XMLgenerator/add_mrca_sampling.py analysis.xml --suffix _trial
+  python3 simulate/XMLgenerator/add_mrca_sampling.py analysis.xml chosen.xml --suffix _trial
+
+The first form creates analysis_MRCASampling.xml next to the input. All
+fileName and operatorAnalysis attributes receive the suffix before their
+final extension: run.log becomes run_MRCASampling.log, and run.MLE.log becomes
+run.MLE_MRCASampling.log. Directory components are preserved. Analysis readers
+are renamed along with log writers so MLE/HME references remain consistent.
+An explicit second positional path is used exactly as given; --suffix still
+applies to analysis filenames inside the XML. Relative analysis paths keep
+their original interpretation; the script does not relocate them.
+
+The script finds the likelihood's treeModel root parameter and fixed LCA
+height, including parameter idref definitions. It appends a randomWalkOperator
+with windowSize=2.5, weight=3, boundaryCondition=reflecting, autoOptimize=true,
+and upper equal to cenancestorHeight. There is no explicit lower limit:
+TreeModel supplies the live oldest-child bound. Existing operators, rates,
+priors, and data are retained. In-document XML comments are preserved;
+ElementTree can normalize XML formatting and quote style.
+
+Inputs must define one cenancestorTreeLikelihood with heightRules=true and
+one operator schedule, a positive finite scalar LCA height, and an identified
+root-height parameter. Sampled LCA parameters and existing root random walks
+are rejected. Empty suffixes and suffixes containing path separators are
+rejected. The input cannot be overwritten, and output creation is exclusive
+to protect existing files.
+
+Validation:
+  PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover \
+    -s simulate/XMLgenerator -p test_add_mrca_sampling.py -v
+All five tests passed, covering both rate-model examples, preservation of
+models/priors/operators, custom IDs, referenced LCA parameters, suffixes and
+analysis readers, CLI defaults/explicit paths, comments, overwrite protection,
+duplicate proposals and unsupported input rejection. The six existing
+convert_to_four_rates.py tests also passed.
+
+Python 3.6 grammar validation passed using ast.parse(feature_version=(3,6)).
+The implementation avoids post-3.6 APIs (including TreeBuilder's newer
+insert_comments option). A Python 3.6.8 interpreter was not available for
+an actual runtime test; tests ran under the installed Python 3 interpreter.
+
+Converted sim1AbsoluteFourRates.xml and ran a temporary shortened copy for
+100 MCMC steps with BeastMain -beagle_off -seed 12345, using the existing
+compiled build. The run completed with finite scores and the root random
+walk active. This checks execution, not convergence or ESS. Temporary XML
+and outputs are in /private/tmp/phyfum-add-mrca.2iLL0c/.
+
+git diff --check passed. No existing source files were changed; nothing pushed.
