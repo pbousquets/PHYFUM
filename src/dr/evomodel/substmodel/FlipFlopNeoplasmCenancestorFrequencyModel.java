@@ -15,6 +15,7 @@ public class FlipFlopNeoplasmCenancestorFrequencyModel extends AbstractGeneralFr
     private final boolean useMethylatedProportion;
     private final Parameter elapsedTime;
     private final Parameter mu, gamma, nu, zeta;
+    private final FounderSubstitutionModel founderModel;
     private final int stateCount;
     private final int stemCells;
 
@@ -50,8 +51,12 @@ public class FlipFlopNeoplasmCenancestorFrequencyModel extends AbstractGeneralFr
         this.gamma = gamma;
         this.nu = nu;
         this.zeta = zeta;
-        // Validate all inputs before registering them with the model.
-        getFrequencies();
+        // Validate inputs before constructing the shared eigendecomposition model.
+        getOriginFrequencies();
+        scalar(elapsedTime, "elapsedTime");
+        validateRates();
+        founderModel = new FounderSubstitutionModel(mu, gamma, nu, zeta);
+        addModel(founderModel); // Includes the eigen cache in MCMC store/restore.
         addVariable(initialFrequencies);
         initialFrequencies.addBounds(new Parameter.DefaultBounds(1.0, 0.0,
                 initialFrequencies.getDimension()));
@@ -76,23 +81,34 @@ public class FlipFlopNeoplasmCenancestorFrequencyModel extends AbstractGeneralFr
     public double[] getFrequencies() {
         double[] initial = getOriginFrequencies();
         double time = scalar(elapsedTime, "elapsedTime");
-        double methylation = scalar(mu, "mu");
-        double demethylation = scalar(gamma, "gamma");
-        double hemiMethylation = scalar(nu, "nu");
-        double hemiDemethylation = scalar(zeta, "zeta");
-        double[][] transition = transitionMatrix(time, methylation, demethylation,
-                hemiMethylation, hemiDemethylation);
+        validateRates();
+        double[] transition = new double[9];
+        if (time == 0) {
+            // At zero duration even a defective generator has the identity transition.
+            transition[0] = transition[4] = transition[8] = 1.0;
+        } else {
+            founderModel.getTransitionProbabilities(time, transition);
+        }
         double[] frequencies = new double[stateCount];
         // PHYFUM enumerates m first, then k: clonal states (0,0), (S,0), (0,S).
         int[] clonalStates = {0, stemCells, stateCount - 1};
         for (int destination = 0; destination < 3; destination++) {
             for (int source = 0; source < 3; source++) {
-                frequencies[clonalStates[destination]] += initial[source] * transition[source][destination];
+                frequencies[clonalStates[destination]] += initial[source] * transition[3 * source + destination];
             }
         }
-        // Deliberately uncached: branchRules can update cenancestorHeight quietly.
-        // Reading live parameters also makes restoration require no additional model state.
+        // Only the rate decomposition is cached. Read time and origin frequencies live:
+        // branchRules can update cenancestorHeight quietly without a change event.
         return frequencies;
+    }
+
+    private void validateRates() {
+        double methylation = scalar(mu, "mu");
+        double demethylation = scalar(gamma, "gamma");
+        double hemiMethylation = scalar(nu, "nu");
+        double hemiDemethylation = scalar(zeta, "zeta");
+        requireNonnegativeFinite(Math.max(Math.max(2 * methylation, 2 * demethylation),
+                hemiMethylation + hemiDemethylation), "Total exit rate");
     }
 
     private double[] getOriginFrequencies() {
@@ -136,70 +152,45 @@ public class FlipFlopNeoplasmCenancestorFrequencyModel extends AbstractGeneralFr
     /**
      * Row-source generator in (U,H,M) order:
      * [-2mu, 2mu, 0; zeta, -(nu+zeta), nu; 0, 2gamma, -2gamma].
-     * Uniformization computes exp(Q*t) without a singular S-1 replacement term
-     * or an eigenvector inverse, including zero rates and absorbing states.
+     * Supply only the single-cell generator; all matrix exponentiation, conditioning
+     * checks and eigen-cache management are inherited from FlipFlopModel's backend.
+     * There is no S-1 replacement term or stationary-frequency rate multiplier.
      */
-    private static double[][] transitionMatrix(double time, double mu, double gamma, double nu, double zeta) {
-        double rate = Math.max(Math.max(2 * mu, 2 * gamma), nu + zeta);
-        requireNonnegativeFinite(rate, "Total exit rate");
-        double[][] transition = identity();
-        if (time == 0 || rate == 0) {
-            return transition;
-        }
-        double[][] jump = {
-                {1 - 2 * mu / rate, 2 * mu / rate, 0},
-                {zeta / rate, 1 - (nu + zeta) / rate, nu / rate},
-                {0, 2 * gamma / rate, 1 - 2 * gamma / rate}
-        };
-        // Scale until rate*t <= 1, then square back. Logarithms avoid overflow
-        // when both the finite rate and finite duration are large.
-        int squarings = Math.max(0, (int) Math.ceil((Math.log(rate) + Math.log(time)) / Math.log(2)));
-        double scaledTime = rate * Math.scalb(time, -squarings);
-        double weight = Math.exp(-scaledTime);
-        double[][] power = identity();
-        for (int i = 0; i < 3; i++) {
-            transition[i][i] = weight;
-        }
-        // exp(Q*t) = exp(-r*t) * sum_n (r*t)^n / n! * (I + Q/r)^n.
-        for (int n = 1; n <= 32; n++) {
-            power = multiply(power, jump);
-            weight *= scaledTime / n;
-            for (int i = 0; i < 3; i++) {
-                for (int j = 0; j < 3; j++) {
-                    transition[i][j] += weight * power[i][j];
-                }
-            }
-        }
-        normalizeRows(transition);
-        for (int n = 0; n < squarings; n++) {
-            transition = multiply(transition, transition);
-            normalizeRows(transition); // Prevent rounding drift under repeated squaring.
-        }
-        return transition;
-    }
+    private static class FounderSubstitutionModel extends ComplexSubstitutionModel {
+        private final Parameter mu, gamma, nu, zeta;
 
-    private static double[][] identity() {
-        return new double[][]{{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
-    }
-
-    private static double[][] multiply(double[][] left, double[][] right) {
-        double[][] product = new double[3][3];
-        for (int i = 0; i < 3; i++) {
-            for (int j = 0; j < 3; j++) {
-                for (int k = 0; k < 3; k++) {
-                    product[i][j] += left[i][k] * right[k][j];
-                }
-            }
+        FounderSubstitutionModel(Parameter mu, Parameter gamma, Parameter nu, Parameter zeta) {
+            this(new AFsequence(3), mu, gamma, nu, zeta);
         }
-        return product;
-    }
 
-    private static void normalizeRows(double[][] matrix) {
-        for (double[] row : matrix) {
-            double sum = row[0] + row[1] + row[2];
-            for (int j = 0; j < 3; j++) {
-                row[j] /= sum;
+        private FounderSubstitutionModel(DataType type, Parameter mu, Parameter gamma,
+                Parameter nu, Parameter zeta) {
+            // The backend requires a FrequencyModel, but these placeholders do not
+            // enter Q or the origin distribution, and flux normalization is disabled.
+            super("neoplasmFounder", type,
+                    new FrequencyModel(type, new double[]{1.0 / 3, 1.0 / 3, 1.0 / 3}), null);
+            this.mu = mu;
+            this.gamma = gamma;
+            this.nu = nu;
+            this.zeta = zeta;
+            for (Parameter rate : new Parameter[]{mu, gamma, nu, zeta}) {
+                addVariable(rate); // Invalidates the inherited cache, deduplicating tied rates.
             }
+            setNormalization(false);
+            // Initialize the eigen storage even if the initial duration is zero,
+            // so the first MCMC storeState never encounters uninitialized arrays.
+            setupMatrix();
+        }
+
+        @Override
+        public void storeIntoAmat() {
+            // setupMatrix supplies the diagonals from these off-diagonal rates.
+            amat[0][1] = 2 * mu.getParameterValue(0);
+            amat[0][2] = 0;
+            amat[1][0] = zeta.getParameterValue(0);
+            amat[1][2] = nu.getParameterValue(0);
+            amat[2][0] = 0;
+            amat[2][1] = 2 * gamma.getParameterValue(0);
         }
     }
 }

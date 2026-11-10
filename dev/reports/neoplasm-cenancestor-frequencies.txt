@@ -31,11 +31,12 @@ The matrix supplied in the request is its column-source equivalent when
 states are ordered (M,H,U). Both state order and orientation must be accounted
 for; transposing alone would reverse the rate meanings for a (U,H,M) vector.
 
-The evolved distribution is p(t) = p(0) exp(Q*t). The implementation uses
-uniformization with scaling and squaring, which also handles zero rates,
-absorbing states, repeated eigenvalues, and long durations. Rates are absolute
-per unit of elapsed time; neither flux normalization nor a tree-clock multiplier
-is applied during this phase.
+The evolved distribution is p(t) = p(0) exp(Q*t). As of 2026-11-09, the
+implementation uses the existing ComplexSubstitutionModel eigendecomposition
+backend, replacing the original custom uniformization routine. Rates remain
+absolute per unit of elapsed time; neither flux normalization nor a tree-clock
+multiplier is applied during this phase. Backend conditioning checks and
+numerical limitations now apply; see neoplasm-eigendecomposition.txt.
 
 PHYFUM enumerates states (k,m) with m outermost and k innermost. Error-free
 replication of the founder yields only the clonal states:
@@ -71,9 +72,11 @@ durations are rejected, not clipped. For serial samples, express the origin
 height in the same backwards coordinate system as the tree.
 
 Parameters are registered for model-change notifications and MCMC restoration.
-Frequencies are calculated from current values on each request, also observing
-the quiet height updates made by branchRules mode. The output is derived and
-cannot be set via setFrequency; change the origin distribution instead.
+The eigendecomposition is cached until a rate changes and stored/restored with
+the model. Frequencies are calculated from live duration and origin-frequency
+values on each request, also observing the quiet height updates made by
+branchRules mode. The output is derived and cannot be set via setFrequency;
+change the origin distribution instead.
 
 XML example fragment (the referenced alignment and rates must already exist)
 ---------------------------------------------------------------------------
@@ -130,6 +133,10 @@ remains deferred. No simulator or reference repository was edited.
 
 Validation
 ----------
+The results below describe the original implementation and subsequent parser
+changes. For validation after switching numerical backends, see the separate
+2026-11-09 report neoplasm-eigendecomposition.txt.
+
 Compiled all Java sources into a fresh temporary build, avoiding stale classes
 from the previous branch:
   JAVA_HOME=/Library/Java/JavaVirtualMachines/jdk-18.0.1.1.jdk/Contents/Home ant \

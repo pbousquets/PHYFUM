@@ -298,6 +298,16 @@ public class TestFlipFlopNeoplasmParser extends TestCase {
                 likelihood.makeDirty();
                 assertEquals(original, likelihood.getLogLikelihood(), 1e-12);
             }
+            // A defective founder generator must give a rejected proposal (-infinity),
+            // not NaNs or an exception, and restoration must recover the likelihood.
+            likelihood.storeModelState();
+            parameter(parser, "gamma").setParameterValue(0, 0.0); // zeta shares gamma.
+            parameter(parser, "nu").setParameterValue(0, 0.06); // equals 2*mu.
+            assertEquals(Double.NEGATIVE_INFINITY, likelihood.getLogLikelihood(), 0.0);
+            likelihood.restoreModelState();
+            assertEquals(original, likelihood.getLogLikelihood(), 1e-12);
+            likelihood.makeDirty();
+            assertEquals(original, likelihood.getLogLikelihood(), 1e-12);
         }
     }
 

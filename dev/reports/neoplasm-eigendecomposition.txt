@@ -1,0 +1,80 @@
+Neoplasm founder frequencies: shared eigendecomposition backend
+Date: 2026-11-09
+Branch: neoplasm-eigendecomposition_AI
+Base: neoplasm_AI, 27d082094
+
+Requested change
+----------------
+Replace the custom matrix exponential with the eigendecomposition implementation
+already used by FlipFlopModel. No change to XML syntax, rate semantics, time
+coordinates, origin-height inference, or the LCA sampling design.
+
+Implementation
+--------------
+FlipFlopNeoplasmCenancestorFrequencyModel now contains a small private
+FounderSubstitutionModel subclass of ComplexSubstitutionModel. It supplies the
+off-diagonal entries of the three-state, row-source generator in (U,H,M) order:
+
+  [-2*mu, 2*mu, 0; zeta, -(nu+zeta), nu; 0, 2*gamma, -2*gamma].
+
+The shared backend constructs the diagonals, decomposes the matrix, checks
+conditioning, and computes transition probabilities. Normalization is disabled;
+the required placeholder FrequencyModel does not multiply the rates or replace
+the supplied origin frequencies. The S-1 cell-replacement formula is not used.
+
+Removed custom uniformization, matrix multiplication, squaring, and row
+renormalization. No changes were made to the old BEAST eigendecomposition code,
+FlipFlopModel, likelihood implementation, parser, or XML generator.
+
+The backend is registered as a child model, with rate parameters registered for
+cache invalidation and MCMC state management. Tied mu/nu and gamma/zeta retain
+their shared Parameter objects. Its eigen storage is initialized during
+construction, including when the initial founder duration is zero, so the
+first storeModelState is safe. Time and origin frequencies are read live on
+each request; quiet cenancestor-height updates remain visible. Changing only
+the duration reuses the eigenvectors. Exact zero duration returns the identity
+transition even if the generator is defective.
+
+Intentional numerical compatibility changes
+------------------------------------------
+The shared backend's conditioning threshold, absolute eigenvalue cutoff of
+1e-10, and negative-entry clipping are inherited unchanged. There is no custom
+fallback. In particular:
+
+* The defective irreversible U -> H -> M generator with equal exit rates
+  (mu=0.4, nu=0.8, gamma=zeta=0) returns the backend's zero-matrix failure
+  sentinel for positive durations, rather than its analytic transition.
+* The former extreme-rate test using rates of order 1e200 fails eigen solver
+  convergence and likewise returns zeros. The backend emits diagnostics.
+* Zero rates and a diagonalizable absorbing generator are still supported.
+* Very small nonzero eigenvalues may be treated as zero. No promise of the
+  original uniformization behavior is retained in this regime.
+
+Zero transition output produces zero founder weights, representing a failed
+decomposition rather than a normalized frequency distribution. Integration
+tests verify that the tree likelihood becomes -infinity and that rejection
+and restoration recover the original likelihood in both height/branch modes.
+An unsupported initial state therefore cannot provide a finite initial
+likelihood. These are limitations inherited from the requested backend, not
+new scientific restrictions on the three-state model.
+
+Validation
+----------
+Ran compile-all and junit_flipflop with JDK 18. All 37 tests across nine suites
+passed, including the 13 founder-model tests and 10 parser/integration tests.
+
+Coverage includes analytic tied-rate evolution, short-time rate direction,
+asymmetric stationary limits, clonal expansion, methylatedProportion, tied and
+independent rate updates, duration-only cache reuse, accept/store/restore, and
+restoration after a failed decomposition. Direct comparison with a generic
+ComplexSubstitutionModel independently assembled from an off-diagonal rate
+vector checks each source state across multiple durations/rate sets, including
+zero and tiny rates. Boundary tests explicitly document changed failure
+behavior rather than silently dropping those cases.
+
+A clean build/test run uses:
+  JAVA_HOME=/Library/Java/JavaVirtualMachines/jdk-18.0.1.1.jdk/Contents/Home ant \
+    -Dbuild=/private/tmp/phyfum-eigen.APdbuY/build compile-all junit_flipflop
+
+No performance benchmark or long-chain convergence claim is made. The existing
+untracked editor swap file for the LCA sampling report was left untouched.

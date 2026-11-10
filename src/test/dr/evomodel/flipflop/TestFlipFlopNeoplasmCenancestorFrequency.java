@@ -1,7 +1,9 @@
 package test.dr.evomodel.flipflop;
 
 import dr.evolution.datatype.AFsequence;
+import dr.evomodel.substmodel.ComplexSubstitutionModel;
 import dr.evomodel.substmodel.FlipFlopNeoplasmCenancestorFrequencyModel;
+import dr.evomodel.substmodel.FrequencyModel;
 import dr.inference.model.Parameter;
 import junit.framework.TestCase;
 
@@ -26,6 +28,39 @@ public class TestFlipFlopNeoplasmCenancestorFrequency extends TestCase {
             sum += actual[i];
         }
         assertEquals(1.0, sum, TOLERANCE);
+    }
+
+    /** Independent assembly through the backend's generic off-diagonal rate vector. */
+    private double[] backendFrequencies(double[] initial, double time,
+            double mu, double gamma, double nu, double zeta) {
+        AFsequence type = new AFsequence(3);
+        // Upper triangle in row order, then lower triangle in column order.
+        Parameter rates = new Parameter.Default(new double[]{2 * mu, 0, nu, zeta, 0, 2 * gamma});
+        ComplexSubstitutionModel backend = new ComplexSubstitutionModel("reference", type,
+                new FrequencyModel(type, new double[]{1.0 / 3, 1.0 / 3, 1.0 / 3}), rates) {
+            @Override
+            protected double[] getPi() {
+                // Absolute rates, as in FlipFlopModel with useFrequencyModel=false.
+                return new double[]{1, 1, 1};
+            }
+        };
+        backend.setNormalization(false);
+        double[] transition = new double[9];
+        backend.getTransitionProbabilities(time, transition);
+        double[] result = new double[3];
+        for (int source = 0; source < 3; source++) {
+            for (int destination = 0; destination < 3; destination++) {
+                result[destination] += initial[source] * transition[3 * source + destination];
+            }
+        }
+        return result;
+    }
+
+    private void assertZeroFrequencies(double[] frequencies) {
+        // This is the backend's invalid-decomposition sentinel, not a distribution.
+        for (double frequency : frequencies) {
+            assertEquals(0.0, frequency, 0.0);
+        }
     }
 
     public void testZeroTimeAndClonalExpansion() {
@@ -73,14 +108,24 @@ public class TestFlipFlopNeoplasmCenancestorFrequency extends TestCase {
         }
     }
 
-    public void testAbsorbingStatesAndRepeatedEigenvalue() {
-        // Irreversible U -> H -> M, both steps at rate 0.8: an Erlang waiting time.
+    public void testDiagonalizableAbsorbingStates() {
+        // Irreversible U -> H -> M with distinct exit rates 0.8 and 0.5.
         double time = 2;
         double survival = Math.exp(-0.8 * time);
-        assertDistribution(new double[]{survival, 0.8*time*survival, 1-(1+0.8*time)*survival},
-                model(1, new double[]{1, 0, 0}, time, 0.4, 0, 0.8, 0).getFrequencies());
+        double hemi = 0.8 / (0.8 - 0.5) * (Math.exp(-0.5 * time) - survival);
+        assertDistribution(new double[]{survival, hemi, 1 - survival - hemi},
+                model(1, new double[]{1, 0, 0}, time, 0.4, 0, 0.5, 0).getFrequencies());
         assertDistribution(new double[]{0, 0, 1},
-                model(1, new double[]{0, 0, 1}, time, 0.4, 0, 0.8, 0).getFrequencies());
+                model(1, new double[]{0, 0, 1}, time, 0.4, 0, 0.5, 0).getFrequencies());
+    }
+
+    public void testDefectiveGeneratorUsesBackendFailure() {
+        // Equal irreversible exit rates form a defective matrix. Do not fall back
+        // to a separate exponential: match the shared backend's rejection behavior.
+        double[] initial = {1, 0, 0};
+        assertZeroFrequencies(backendFrequencies(initial, 2, 0.4, 0, 0.8, 0));
+        assertZeroFrequencies(model(1, initial, 2, 0.4, 0, 0.8, 0).getFrequencies());
+        assertDistribution(initial, model(1, initial, 0, 0.4, 0, 0.8, 0).getFrequencies());
     }
 
     public void testAsymmetricStationaryLimitAndLargeTime() {
@@ -89,9 +134,87 @@ public class TestFlipFlopNeoplasmCenancestorFrequency extends TestCase {
         double[] expected = {0.16/sum, 0.24/sum, 0.42/sum};
         assertDistribution(expected, model(1, new double[]{1, 0, 0}, 1e6,
                 0.3, 0.2, 0.7, 0.4).getFrequencies());
-        // The product of finite rates and time can overflow; the result must not.
-        assertDistribution(expected, model(1, new double[]{1, 0, 0}, 1e200,
+    }
+
+    public void testExtremeRatesUseBackendFailure() {
+        // The shared decomposition does not converge at these extreme rates.
+        // This explicitly records the loss of the former uniformization guarantee.
+        double[] initial = {1, 0, 0};
+        assertZeroFrequencies(backendFrequencies(initial, 1e200,
+                0.3e200, 0.2e200, 0.7e200, 0.4e200));
+        assertZeroFrequencies(model(1, initial, 1e200,
                 0.3e200, 0.2e200, 0.7e200, 0.4e200).getFrequencies());
+    }
+
+    public void testMatchesSharedBackend() {
+        for (double[] rates : new double[][]{{0.3, 0.2, 0.7, 0.4}, {0.03, 0.02, 0.03, 0.02},
+                {1.5, 0.05, 0.4, 0.6}, {0, 0, 0, 0}, {3e-13, 2e-13, 7e-13, 4e-13}}) {
+            for (double time : new double[]{1e-5, 0.5, 20, 1e6}) {
+                for (int source = 0; source < 3; source++) {
+                    double[] initial = new double[3];
+                    initial[source] = 1;
+                    double[] expected = backendFrequencies(initial, time,
+                            rates[0], rates[1], rates[2], rates[3]);
+                    double[] actual = model(1, initial, time,
+                            rates[0], rates[1], rates[2], rates[3]).getFrequencies();
+                    // Compare entries rather than imposing row renormalization:
+                    // tiny-rate eigenvalue cutoffs/clipping are inherited unchanged.
+                    for (int state = 0; state < 3; state++) {
+                        assertEquals(expected[state], actual[state], TOLERANCE);
+                    }
+                }
+            }
+        }
+    }
+
+    public void testIndependentRateUpdatesCacheAndAcceptRestore() {
+        Parameter initial = new Parameter.Default(new double[]{0.2, 0.3, 0.5});
+        Parameter time = new Parameter.Default(0.0);
+        Parameter[] rates = {new Parameter.Default(0.3), new Parameter.Default(0.2),
+                new Parameter.Default(0.7), new Parameter.Default(0.4)};
+        FlipFlopNeoplasmCenancestorFrequencyModel model = new FlipFlopNeoplasmCenancestorFrequencyModel(
+                new AFsequence(3), initial, time, rates[0], rates[1], rates[2], rates[3]);
+        ComplexSubstitutionModel backend = (ComplexSubstitutionModel) model.getModel(0);
+        double[][] eigenvectors = backend.getEigenVectors();
+        // Store before the first nonzero duration: eigen state must already exist.
+        model.storeModelState();
+        time.setParameterValueQuietly(0, 2.0);
+        assertDistribution(backendFrequencies(initial.getParameterValues(), 2, 0.3, 0.2, 0.7, 0.4),
+                model.getFrequencies());
+        assertSame(eigenvectors, backend.getEigenVectors());
+        model.acceptModelState();
+        for (int index = 0; index < rates.length; index++) {
+            double[] before = model.getFrequencies();
+            model.storeModelState();
+            rates[index].setParameterValue(0, rates[index].getParameterValue(0) * 1.5);
+            double[] expected = backendFrequencies(initial.getParameterValues(), 2,
+                    rates[0].getParameterValue(0), rates[1].getParameterValue(0),
+                    rates[2].getParameterValue(0), rates[3].getParameterValue(0));
+            assertDistribution(expected, model.getFrequencies());
+            assertNotSame(eigenvectors, backend.getEigenVectors());
+            model.restoreModelState();
+            assertDistribution(before, model.getFrequencies());
+            // Accept the same proposal next, then test restoration from that state.
+            model.storeModelState();
+            rates[index].setParameterValue(0, rates[index].getParameterValue(0) * 1.5);
+            assertDistribution(expected, model.getFrequencies());
+            model.acceptModelState();
+            eigenvectors = backend.getEigenVectors();
+        }
+    }
+
+    public void testRestoreAfterFailedDecomposition() {
+        Parameter nu = new Parameter.Default(0.5);
+        FlipFlopNeoplasmCenancestorFrequencyModel model = new FlipFlopNeoplasmCenancestorFrequencyModel(
+                new AFsequence(3), new Parameter.Default(new double[]{1, 0, 0}),
+                new Parameter.Default(2.0), new Parameter.Default(0.4), new Parameter.Default(0.0),
+                nu, new Parameter.Default(0.0));
+        double[] original = model.getFrequencies();
+        model.storeModelState();
+        nu.setParameterValue(0, 0.8);
+        assertZeroFrequencies(model.getFrequencies());
+        model.restoreModelState();
+        assertDistribution(original, model.getFrequencies());
     }
 
     public void testParameterChangesQuietTimeChangesAndRestore() {
