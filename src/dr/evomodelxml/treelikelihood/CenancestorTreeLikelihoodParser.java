@@ -78,11 +78,29 @@ public class CenancestorTreeLikelihoodParser extends AbstractXMLObjectParser {
 
         CenancestorBranchRateModel branchRateModel = (CenancestorBranchRateModel) xo.getChild(CenancestorBranchRateModel.class);
 
-        Parameter cenancestor = (Parameter) xo.getElementFirstChild(CENANCESTOR_HEIGHT);
+        Parameter cenancestor = xo.hasChildNamed(CENANCESTOR_HEIGHT) ? (Parameter) xo.getElementFirstChild(CENANCESTOR_HEIGHT) : null;
 
-        Parameter cenancestorBranch= (Parameter) xo.getElementFirstChild(CENANCESTOR_BRANCH);
+        Parameter cenancestorBranch= xo.hasChildNamed(CENANCESTOR_BRANCH) ? (Parameter) xo.getElementFirstChild(CENANCESTOR_BRANCH) : null;
+        if (cenancestorFrequencyModel instanceof dr.evomodel.substmodel.FlipFlopNeoplasmCenancestorFrequencyModel) {
+            dr.evomodel.tree.NeoplasmTimingModel timing =
+                    ((dr.evomodel.substmodel.FlipFlopNeoplasmCenancestorFrequencyModel) cenancestorFrequencyModel).getTimingModel();
+            if (timing != null) {
+                if (xo.hasAttribute(HEIGHT_RULES) || cenancestor != null || cenancestorBranch != null) {
+                    throw new XMLParseException("neoplasmTiming supplies both heights; omit heightRules, cenancestorHeight and cenancestorBranch");
+                }
+                if (timing.getTree() != treeModel || !timing.isValid()) {
+                    throw new XMLParseException("Likelihood must use the valid tree from neoplasmTiming");
+                }
+                cenancestor = timing.getHeightParameter();
+                cenancestorBranch = timing.getBranchParameter();
+                heightRules = true;
+            }
+        }
 
         //Parameter AsStatistic=(Parameter) xo.getChild(USE_AS_STATISTIC);
+        if (cenancestor == null || cenancestorBranch == null) {
+            throw new XMLParseException("Specify both cenancestorHeight and cenancestorBranch, or use neoplasmTiming in the founder model");
+        }
 
         TipStatesModel tipStatesModel = (TipStatesModel) xo.getChild(TipStatesModel.class);
         if (tipStatesModel != null && tipStatesModel.getPatternList() != null) {

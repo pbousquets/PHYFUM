@@ -58,6 +58,7 @@ import java.util.logging.Logger;
  */
 
 public class CenancestorTreeLikelihood extends AbstractTreeLikelihood {
+    private final dr.evomodel.tree.NeoplasmTimingModel neoplasmTiming;
     private static final boolean DEBUG = false;
     private Parameter cenancestorHeight = null;
     private Parameter cenancestorBranch = null;
@@ -85,6 +86,15 @@ public class CenancestorTreeLikelihood extends AbstractTreeLikelihood {
                                      boolean heightRules) {
 
         super(CenancestorTreeLikelihoodParser.TREE_LIKELIHOOD, patternList, treeModel);
+        neoplasmTiming = cenancestorFrequencyModel instanceof dr.evomodel.substmodel.FlipFlopNeoplasmCenancestorFrequencyModel
+                ? ((dr.evomodel.substmodel.FlipFlopNeoplasmCenancestorFrequencyModel) cenancestorFrequencyModel).getTimingModel() : null;
+        if (neoplasmTiming != null) {
+            if (neoplasmTiming.getTree() != treeModel || cenancestorHeight != neoplasmTiming.getHeightParameter()
+                    || cenancestorBranch != neoplasmTiming.getBranchParameter() || !heightRules) {
+                throw new IllegalArgumentException("Neoplasm likelihood must use the shared timing tree and derived heights");
+            }
+            addModel(neoplasmTiming);
+        }
 
         StringBuilder sb = new StringBuilder("New cenancestor tree likelihood:");
         sb.append("\n\t- Intree nodes = "+treeModel.getNodeCount());
@@ -99,7 +109,7 @@ public class CenancestorTreeLikelihood extends AbstractTreeLikelihood {
 
         sb.append("\n\t- Total nodes = "+nodeCount);
 
-        if (!branchRules) {
+        if (!branchRules && neoplasmTiming == null) {
             sb.append("\n\t- WARNING: using cenancestor height to determine branch length."
                     + "\n\t\tBranch length should not be operated upon."
                     + "\n\t\tMRCA should have a prior/lower limit that avoids negative cenancestor branch lengths");
@@ -367,10 +377,12 @@ public class CenancestorTreeLikelihood extends AbstractTreeLikelihood {
     }
 
     private final void updateCenancestorBranch() {
+        if (neoplasmTiming != null) return;
         cenancestorBranch.setParameterValueQuietly(0, getCenancestorHeight()-treeModel.getNodeHeight(treeModel.getRoot()));
     }
 
     private final void updateCenancestorHeight() {
+        if (neoplasmTiming != null) return;
         cenancestorHeight.setParameterValueQuietly(0, treeModel.getNodeHeight(treeModel.getRoot())+getCenancestorBranch());
     }
 
@@ -394,6 +406,12 @@ public class CenancestorTreeLikelihood extends AbstractTreeLikelihood {
      */
     protected void handleVariableChangedEvent(Variable variable, int index, Parameter.ChangeType type)
     {
+        if (neoplasmTiming != null) {
+            updateCenancestorState();
+            updateNode(treeModel.getRoot());
+            fireModelChanged();
+            return;
+        }
         if (variable==this.cenancestorHeight)
         {
             updateCenancestorBranch();
@@ -421,7 +439,10 @@ public class CenancestorTreeLikelihood extends AbstractTreeLikelihood {
      */
     protected void handleModelChangedEvent(Model model, Object object, int index) {
 
-        if (model == treeModel) {
+        if (model == neoplasmTiming) {
+            updateCenancestorState();
+            updateNode(treeModel.getRoot());
+        } else if (model == treeModel) {
             if (object instanceof TreeModel.TreeChangedEvent) {
 
                 if (((TreeModel.TreeChangedEvent) object).areAllInternalHeightsChanged()) {
@@ -518,11 +539,33 @@ public class CenancestorTreeLikelihood extends AbstractTreeLikelihood {
     // **************************************************************
 
     /**
-     * Calculate the log likelihood of the current state.
-     *
-     * @return the log likelihood.
+     * Mark the likelihood as part of a posterior, invalidating any pre-MCMC cache.
      */
+    @Override
+    public void setUsed() {
+        super.setUsed();
+        // Recheck the posterior wiring even if a caller evaluated the likelihood before MCMC initialization.
+        if (neoplasmTiming != null) makeDirty();
+    }
+
+    /** Calculate the data likelihood, rejecting invalid timing before any transitions. */
     protected double calculateLogLikelihood() {
+        // Reject invalid proposals before either founder or branch transitions are evaluated.
+        // Ordinary tree/topology operators are not required to know about the origin.
+        if (neoplasmTiming != null) {
+            if (isUsed() && !neoplasmTiming.isUsed()) {
+                throw new IllegalStateException("Include neoplasmTiming once in the prior (support and coordinate Jacobian)");
+            }
+            if (!neoplasmTiming.isValid()) return Double.NEGATIVE_INFINITY;
+        }
+        if (!Double.isFinite(getCenancestorHeight()) || !Double.isFinite(getCenancestorBranch())
+                || getCenancestorBranch() < 0 || getCenancestorHeight() < treeModel.getNodeHeight(treeModel.getRoot())) {
+            return Double.NEGATIVE_INFINITY;
+        }
+        if (cenancestorFrequencyModel instanceof dr.evomodel.substmodel.FlipFlopNeoplasmCenancestorFrequencyModel
+                && !((dr.evomodel.substmodel.FlipFlopNeoplasmCenancestorFrequencyModel) cenancestorFrequencyModel).hasValidDuration()) {
+            return Double.NEGATIVE_INFINITY;
+        }
 
         if (patternLogLikelihoods == null) {
             patternLogLikelihoods = new double[patternCount];

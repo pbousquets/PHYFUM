@@ -4,6 +4,7 @@ import dr.evolution.alignment.PatternList;
 import dr.evolution.datatype.DataType;
 import dr.evolution.util.Date;
 import dr.evomodel.substmodel.FlipFlopNeoplasmCenancestorFrequencyModel;
+import dr.evomodel.tree.NeoplasmTimingModel;
 import dr.inference.model.DifferenceParameter;
 import dr.inference.model.Parameter;
 import dr.xml.*;
@@ -34,8 +35,16 @@ public class FlipFlopNeoplasmCenancestorFrequencyParser extends AbstractXMLObjec
         if (xo.hasChildNamed("elapsedTime")) {
             throw new XMLParseException("elapsedTime is no longer supported; use cenancestorHeight with an optional originHeight");
         }
-        Parameter cenancestor = parameter(xo, CENANCESTOR_HEIGHT);
-        Parameter origin = xo.hasChildNamed(ORIGIN_HEIGHT) ? parameter(xo, ORIGIN_HEIGHT) : inferOriginHeight(patterns);
+        NeoplasmTimingModel timing = (NeoplasmTimingModel) xo.getChild(NeoplasmTimingModel.class);
+        if (timing != null && (xo.hasChildNamed(CENANCESTOR_HEIGHT) || xo.hasChildNamed(ORIGIN_HEIGHT))) {
+            throw new XMLParseException("Use neoplasmTiming OR explicit heights, not both");
+        }
+        if (timing == null && !xo.hasChildNamed(CENANCESTOR_HEIGHT)) {
+            throw new XMLParseException("Specify neoplasmTiming or cenancestorHeight");
+        }
+        Parameter cenancestor = timing == null ? parameter(xo, CENANCESTOR_HEIGHT) : timing.getHeightParameter();
+        Parameter origin = timing != null ? timing.getOriginParameter()
+                : xo.hasChildNamed(ORIGIN_HEIGHT) ? parameter(xo, ORIGIN_HEIGHT) : inferOriginHeight(patterns);
         if (origin.getDimension() != 1 || cenancestor.getDimension() != 1
                 || !Double.isFinite(origin.getParameterValue(0))
                 || !Double.isFinite(cenancestor.getParameterValue(0))
@@ -46,7 +55,8 @@ public class FlipFlopNeoplasmCenancestorFrequencyParser extends AbstractXMLObjec
             throw new XMLParseException("originHeight must be greater than or equal to cenancestorHeight");
         }
         // BEAST heights increase backwards in time. The duration is always derived.
-        Parameter elapsedTime = new DifferenceParameter(Arrays.asList(origin, cenancestor));
+        Parameter elapsedTime = timing == null ? new DifferenceParameter(Arrays.asList(origin, cenancestor))
+                : timing.getDurationParameter();
 
         boolean hasFrequencies = xo.hasChildNamed(FREQUENCIES);
         boolean hasProportion = xo.hasChildNamed(METHYLATED_PROPORTION);
@@ -59,8 +69,10 @@ public class FlipFlopNeoplasmCenancestorFrequencyParser extends AbstractXMLObjec
         }
         try {
             if (hasProportion) {
-                return FlipFlopNeoplasmCenancestorFrequencyModel.fromMethylatedProportion(dataType,
+                FlipFlopNeoplasmCenancestorFrequencyModel model = FlipFlopNeoplasmCenancestorFrequencyModel.fromMethylatedProportion(dataType,
                         parameter(xo, METHYLATED_PROPORTION), elapsedTime, mu, gamma, nu, zeta);
+                if (timing != null) model.setTimingModel(timing);
+                return model;
             }
             Parameter frequencies = hasFrequencies ? parameter(xo, FREQUENCIES) : new Parameter.Default(3);
             if (hasProportionAttribute) {
@@ -90,8 +102,10 @@ public class FlipFlopNeoplasmCenancestorFrequencyParser extends AbstractXMLObjec
                     frequencies.setParameterValue(i, frequencies.getParameterValue(i) / sum);
                 }
             }
-            return new FlipFlopNeoplasmCenancestorFrequencyModel(dataType, frequencies,
+            FlipFlopNeoplasmCenancestorFrequencyModel model = new FlipFlopNeoplasmCenancestorFrequencyModel(dataType, frequencies,
                     elapsedTime, mu, gamma, nu, zeta);
+            if (timing != null) model.setTimingModel(timing);
+            return model;
         } catch (IllegalArgumentException error) {
             throw new XMLParseException(error.getMessage());
         }
@@ -102,7 +116,7 @@ public class FlipFlopNeoplasmCenancestorFrequencyParser extends AbstractXMLObjec
     }
 
     /** Infer once from this alignment's ages, avoiding BEAST's global taxon date cache. */
-    private static Parameter inferOriginHeight(PatternList patterns) throws XMLParseException {
+    public static Parameter inferOriginHeight(PatternList patterns) throws XMLParseException {
         final String guidance = "; supply an explicit originHeight instead";
         final int count;
         try {
@@ -156,7 +170,8 @@ public class FlipFlopNeoplasmCenancestorFrequencyParser extends AbstractXMLObjec
             AttributeRule.newDoubleRule(METHYLATED_PROPORTION, true),
             AttributeRule.newBooleanRule("normalize", true),
             new ElementRule(ORIGIN_HEIGHT, new XMLSyntaxRule[]{new ElementRule(Parameter.class)}, true),
-            new ElementRule(CENANCESTOR_HEIGHT, new XMLSyntaxRule[]{new ElementRule(Parameter.class)}),
+            new ElementRule(CENANCESTOR_HEIGHT, new XMLSyntaxRule[]{new ElementRule(Parameter.class)}, true),
+            new ElementRule(NeoplasmTimingModel.class, true),
             new ElementRule("mu", new XMLSyntaxRule[]{new ElementRule(Parameter.class)}),
             new ElementRule("gamma", new XMLSyntaxRule[]{new ElementRule(Parameter.class)}),
             new ElementRule("nu", new XMLSyntaxRule[]{new ElementRule(Parameter.class)}, true),

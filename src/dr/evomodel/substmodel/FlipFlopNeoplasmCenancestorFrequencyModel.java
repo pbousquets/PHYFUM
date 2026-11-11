@@ -3,6 +3,7 @@ package dr.evomodel.substmodel;
 import dr.evolution.datatype.AFsequence;
 import dr.evolution.datatype.DataType;
 import dr.inference.model.Parameter;
+import dr.evomodel.tree.NeoplasmTimingModel;
 
 /**
  * Evolves a single founder cell before error-free expansion to a stem-cell niche.
@@ -18,6 +19,21 @@ public class FlipFlopNeoplasmCenancestorFrequencyModel extends AbstractGeneralFr
     private final FounderSubstitutionModel founderModel;
     private final int stateCount;
     private final int stemCells;
+    private NeoplasmTimingModel timing;
+
+    /** Bind the shared geometry; duration must be its live read-only output. */
+    public void setTimingModel(NeoplasmTimingModel timing) {
+        if (this.timing != null || elapsedTime != timing.getDurationParameter()) {
+            throw new IllegalArgumentException("Founder frequencies must use the shared timing duration");
+        }
+        this.timing = timing;
+        addModel(timing);
+    }
+    public NeoplasmTimingModel getTimingModel() { return timing; }
+    public boolean hasValidDuration() {
+        double t = elapsedTime.getParameterValue(0);
+        return Double.isFinite(t) && t >= 0 && (timing == null || timing.isValid());
+    }
 
     public FlipFlopNeoplasmCenancestorFrequencyModel(DataType dataType, Parameter initialFrequencies,
             Parameter elapsedTime, Parameter mu, Parameter gamma, Parameter nu, Parameter zeta) {

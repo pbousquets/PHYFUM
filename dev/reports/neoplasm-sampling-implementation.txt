@@ -1,0 +1,204 @@
+Neoplasm LCA sampling implementation
+Date: 2026-11-10
+Branch: neoplasm-sampling_AI
+Base: neoplasm-eigendecomposition_AI, 27602e4dd
+
+Summary
+-------
+Implemented a shared fraction-based timing model, a joint internal-tree/stem
+scaling operator, origin/support guards, XML interfaces, and a runnable example.
+The example now places prior information on absolute LCA height, as requested,
+instead of on LCA-MRCA branch length. It retains the coalescent prior on the
+intree, which already informs the MRCA. No extra stem prior is required.
+This is a practical starting strategy, not a claim of optimal mixing.
+
+Coordinates and state
+---------------------
+H = fixed originHeight, R = current MRCA/root height, C = LCA height.
+All heights are backwards from the latest sampling time. The sampled parameter
+q is the fraction measured from MRCA towards origin, NOT forwards from origin:
+
+  q = (C-R)/(H-R),  C = R+q(H-R)
+  B = C-R = q(H-R)          [LCA-MRCA stem]
+  A = H-C = (1-q)(H-R)      [single-founder duration]
+
+The tree and q are the independent sampled quantities. C, B and A are live,
+read-only Parameters. All partitions must share one NeoplasmTimingModel for
+the same tree. H is inferred once from the alignment ages using the existing
+inference routine, or supplied explicitly. It is fixed, not sampled: explicit
+origin parameters receive equal lower/upper bounds, and changing their value
+makes the timing state invalid. The standalone elapsedTime XML option remains
+removed. This change does not alter rates, origin frequencies, methylated-
+proportion semantics, or the shared eigendecomposition backend.
+
+Support requires a valid finite tree with nonnegative heights, R<H, and
+0<=q<=1. A=0 and B=0 are allowed; R=H is excluded because q would be undefined.
+Ordinary tree moves leave q fixed, deriving C/B/A from the new root even when
+the root's identity changes. No new dynamic LCA upper bound is imposed on
+individual tree nodes, so legacy tree/topology operators need no edits.
+
+Operators
+---------
+1. Local allocation: existing reflected randomWalkOperator on q, window 0.15,
+   weight 5, autoOptimize=false in the example. At fixed tree its log Hastings
+   ratio is zero. Keep the window within [0,1] for this bounded coordinate.
+2. Global allocation: existing uniformOperator on q, weight 1. This is a
+   symmetric independence proposal, not a conditional posterior/Gibbs draw.
+3. New neoplasmTreeScale, initial scaleFactor=0.8, weight 3. Draw
+   s uniformly from [scaleFactor,1/scaleFactor], then propose:
+     h_i'=s h_i for all K internal heights; R'=sR; B'=sB; C'=sC
+     q'=s q(H-R)/(H-sR).
+   H and tip dates remain fixed. The operator returns
+     (K-1) log(s) + log((H-R)/(H-sR)).
+   The determinant of the state transform is s^(K+1)*(H-R)/(H-sR);
+   inversion of the uniform scale contributes s^-2. This is not the same
+   operation as scaling the tree at fixed q. Proposed origin crossings and
+   parents below dated tips are rejected; draws are not repeatedly resampled.
+4. Keep ordinary topology, node-height and rate operators. The example also
+   retains its existing rate/tree up-down move, which now keeps q fixed.
+   This is a valid proposal, but not an exact likelihood-preserving symmetry:
+   a fixed H breaks compensation of founder duration by reciprocal rate scaling.
+
+The first smoke run exposed an existing BEAST tuning hazard: when fraction
+acceptance is very high, unconstrained reflected-window adaptation can grow
+the window beyond useful floating-point precision. The final example disables
+that adaptation and uses the uniform move for larger jumps. Joint tree-scale
+tuning remains enabled. No edits to the old RandomWalkOperator were needed.
+
+Prior semantics
+---------------
+The default priorCoordinate="height" expresses the target density with
+respect to absolute C. Put the biological prior on the read-only LCA height,
+and include neoplasmTiming ONCE in the prior. Its contribution is:
+
+  log(H-R) on valid states; -infinity outside timing support.
+
+This is a coordinate Jacobian, not an extra biological prior. It ensures that
+sampling q targets p(tree)*p_C(C)*I(R<=C<=H) in (tree,C) coordinates rather than
+silently adding a uniform fraction prior. There is no conditional truncation
+renormalization at each R: multiplying the tree and LCA priors and imposing
+their shared support is the intended joint model. This induces dependence
+between R and C, as their ordering requires.
+
+If biological information describes time from origin to LCA, place the prior
+on founder.duration (=H-C), still using priorCoordinate="height"; its absolute
+Jacobian is also H-R. Backwards height and forward elapsed age must not be
+confused when specifying an informative distribution.
+
+The example uses Uniform(0,45) on C as an explicitly broad placeholder, not an
+invented informative biological prior, plus the existing coalescent tree prior.
+Replace that uniform prior with the desired biological distribution. A further
+MRCA or stem constraint can be supplied if there is genuinely additional
+information, but is not required to make the sampler valid. C, B, R are
+dependent: adding priors to all three is a modelling decision, not an operator
+requirement. Add the coordinate Jacobian only once regardless of how many
+such prior factors or sequence partitions are present.
+
+For intentionally retaining a prior on B, priorCoordinate="branch" uses the
+same Jacobian. For a prior specified directly on q, priorCoordinate="fraction"
+omits it. These alternatives intentionally define different prior measures.
+Do not switch the attribute merely to alter mixing or count the Jacobian per
+tree likelihood. MCMC initialization/evaluation rejects configurations using
+the new tree-likelihood mode without the timing likelihood in the posterior.
+
+XML migration / example
+-----------------------
+examples/release/flipflop/sim1Neoplasm.xml uses the full sim1Absolute data,
+10,000 steps, and logs q, C, B, A and R. The original example is unchanged.
+The XML generator is not modified by this task. Main new blocks:
+
+  <neoplasmTiming id="neoplasm.timing" priorCoordinate="height">
+      <treeModel idref="treeModel"/>
+      <afalignment idref="alignment"/>
+      <lcaFraction><parameter id="lca.fraction" value="0.5" lower="0" upper="1"/></lcaFraction>
+  </neoplasmTiming>
+  <neoplasmTimingParameter id="luca_height" quantity="height">
+      <neoplasmTiming idref="neoplasm.timing"/>
+  </neoplasmTimingParameter>
+
+The same accessor accepts quantity="branch" and quantity="duration" for
+logging or prior attachment. Its output is not an independent parameter and
+must never be the target of a scale or random-walk operator.
+
+In flipflopNeoplasmCenancestorFrequency, replace the explicit height inputs
+with <neoplasmTiming idref="neoplasm.timing"/>. Supply the usual alignment,
+origin frequencies (e.g. 0.5 0 0.5) or methylatedProportion, and rate references.
+The tree likelihood automatically gets timing from this frequency model:
+omit heightRules, cenancestorHeight and cenancestorBranch there. Mixed modes
+and a different timing/tree object are rejected. Existing height/branch XML
+continues to work without neoplasmTiming.
+
+In the prior include <neoplasmTiming idref="neoplasm.timing"/> exactly once,
+and put the chosen LCA prior on <neoplasmTimingParameter idref="luca_height"/>.
+Use the actual defining element name for idref entries under strict XML parsing
+(e.g. afalignment, not the generic alignment alias). Operators:
+
+  <randomWalkOperator windowSize="0.15" boundaryCondition="reflecting" autoOptimize="false" weight="5">
+      <parameter idref="lca.fraction"/>
+  </randomWalkOperator>
+  <uniformOperator weight="1"><parameter idref="lca.fraction"/></uniformOperator>
+  <neoplasmTreeScale scaleFactor="0.8" weight="3">
+      <neoplasmTiming idref="neoplasm.timing"/>
+  </neoplasmTreeScale>
+
+Build/run from PHYFUM (use a Java version compatible with source level 8):
+  JAVA_HOME=/Library/Java/JavaVirtualMachines/jdk-18.0.1.1.jdk/Contents/Home ant compile-all
+  /Library/Java/JavaVirtualMachines/jdk-18.0.1.1.jdk/Contents/Home/bin/java \
+    -cp 'build:src:lib/*' dr.app.beast.BeastMain -beagle_off -seed 9234 \
+    examples/release/flipflop/sim1Neoplasm.xml
+
+Output names use sim1Neoplasm; use a separate run directory/classpath or rename
+the log outputs before rerunning, because log overwriting is disabled.
+
+Safety and implementation scope
+-------------------------------
+New classes: NeoplasmTimingModel, NeoplasmTreeScaleOperator, and their timing,
+derived-parameter and operator parsers. Existing neoplasm model/parser bind to
+the shared timing object. CenancestorTreeLikelihood skips writes to derived
+heights, invalidates founder/stem calculations on timing changes, and rejects
+invalid geometry before exponentiation. Its legacy neoplasm modes also reject
+negative founder durations and negative stems instead of passing them to the
+numerical backend. Tree bounds and fixed dated tips are respected. No clipping
+of invalid proposals or new fixed epsilon on branch lengths is introduced.
+
+No core TreeModel, BEAST tree operator, general matrix code, or flipflop
+reference repository was modified. Only the new example's inherited generic
+idref tag aliases were corrected to also support -strict parsing.
+The editor swap file for the earlier
+planning report was left untouched.
+
+Validation
+----------
+All 44 FlipFlop tests passed across ten suites using JDK 18. A fresh temporary
+build is under /private/tmp/phyfum-sampling.Wgv1uD/build. Coverage includes:
+derived geometry/endpoints, fixed origin, read-only outputs, rejected support,
+scale inverse/Hastings calculations, dated tips, actual root-changing subtree
+slides, all three likelihood timing modes, cache versus full recalculation,
+store/restore, XML parsing/inferred origin, and a missing-Jacobian wiring guard.
+
+Two seeded prior-only tests run 120,000 proposals each (20,000 burn-in), mixing
+local fraction, root and joint-scale moves. They recover the analytic means
+for uniform density in (R,C), and the distinct means for uniform density in
+(R,q). Thus the checks exercise the full acceptance ratio, not only valid
+branch lengths or a good acceptance rate.
+
+Two final example runs of 10,000 steps completed, seeds 9234 and 19013:
+  /private/tmp/phyfum-sampling-final.YI0n1z/
+  /private/tmp/phyfum-sampling-seed2.lEDIbi/
+Joint-scale acceptance was 0.2222 and 0.2312 respectively. Each log contains
+101 samples; all sampled heights obeyed 0<=R<=C<=45, both branches were
+nonnegative, and timing identities agreed within 7.2e-15. The fixed-window
+fraction move no longer develops extreme tuning values. Existing warnings
+about unused branchRates/flipflopSubstitutionModel likelihood components are
+inherited from the base example, not new timing failures.
+
+After correcting those inherited idref aliases, a 100-step copy of the final
+example also completed with -strict -beagle_off -seed 715 in
+/private/tmp/phyfum-sampling-strict.rtq3S0/.
+
+These short runs are smoke tests, not convergence or ESS comparisons. Their
+different final posterior levels and very high fraction acceptance underline
+the need for longer chains, multiple seeds, and biological-prior sensitivity
+analysis before inference. The data may weakly identify allocation even when
+the operators explore it readily. The earlier design report remains useful
+background, but this entry describes the implemented API and current defaults.

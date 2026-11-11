@@ -237,12 +237,43 @@ public class TestFlipFlopNeoplasmParser extends TestCase {
         }
     }
 
-    public void testLikelihoodUpdatesInBothHeightModes() throws Exception {
-        for (boolean heightRules : new boolean[]{true, false}) {
+    public void testTimingXmlValidationAndInference() throws Exception {
+        for (String coordinate : new String[]{"height", "branch", "fraction", "invalid"}) {
+            XMLParser parser = new XMLParser(false, true);
+            parser.addXMLObjectParser(new ParameterParser());
+            parser.addXMLObjectParser(new dr.evomodelxml.tree.NeoplasmTimingParser());
+            parser.addXMLObjectParser(new dr.evomodelxml.tree.NeoplasmTimingParameterParser());
+            parser.addXMLObjectParser(new dr.evomodelxml.operators.NeoplasmTreeScaleOperatorParser());
+            store(parser, "patterns", datedPatterns(new Date(5, Units.Type.YEARS, false)));
+            store(parser, "treeModel", new TreeModel(new NewickImporter("(A:1,B:1);").importTree(null)));
+            String xml = "<beast><neoplasmTiming id='timing' priorCoordinate='" + coordinate + "'>"
+                    + "<treeModel idref='treeModel'/><patterns idref='patterns'/>"
+                    + "<lcaFraction><parameter id='q' value='0.25'/></lcaFraction></neoplasmTiming>"
+                    + "<neoplasmTimingParameter id='derived' quantity='height'><neoplasmTiming idref='timing'/></neoplasmTimingParameter>"
+                    + "<neoplasmTreeScale id='scale' scaleFactor='0.8' weight='3'><neoplasmTiming idref='timing'/></neoplasmTreeScale></beast>";
+            if (coordinate.equals("invalid")) {
+                try { parser.parse(new StringReader(xml), false); fail(); }
+                catch (XMLParseException expected) { }
+            } else {
+                parser.parse(new StringReader(xml), false);
+                dr.evomodel.tree.NeoplasmTimingModel timing = (dr.evomodel.tree.NeoplasmTimingModel) object(parser, "timing");
+                assertEquals(5.0, timing.getOriginHeight(), 0);
+                assertSame(timing.getHeightParameter(), parameter(parser, "derived"));
+                assertEquals(coordinate.equals("fraction") ? 0 : Math.log(4), timing.getLogLikelihood(), 1e-12);
+                assertEquals(2.0, parameter(parser, "derived").getParameterValue(0), 1e-12);
+            }
+        }
+    }
+
+    public void testLikelihoodUpdatesInAllTimingModes() throws Exception {
+        for (String mode : new String[]{"height", "branch", "fraction"}) {
+            boolean fractionMode = mode.equals("fraction");
+            boolean heightRules = !mode.equals("branch");
             XMLParser parser = new XMLParser(false, true);
             parser.addXMLObjectParser(new ParameterParser());
             parser.addXMLObjectParser(new FlipFlopNeoplasmCenancestorFrequencyParser());
             parser.addXMLObjectParser(new CenancestorTreeLikelihoodParser());
+            parser.addXMLObjectParser(new dr.evomodelxml.tree.NeoplasmTimingParser());
             AFsequence type = new AFsequence(6);
             Taxa taxa = new Taxa();
             taxa.addTaxon(new Taxon("A"));
@@ -260,14 +291,18 @@ public class TestFlipFlopNeoplasmParser extends TestCase {
             store(parser, "branchRates", new StrictClockCenancestorBranchRates(new Parameter.Default(1.0)));
             store(parser, "errorModel", new FlipFlopErrorModel(taxa, new Taxa(), cells,
                     new Parameter.Default(0.05), new Parameter.Default(0.95), new Parameter.Default(30.0)));
-            String xml = "<beast>" + modelXml("", ROOT, HEIGHTS,
+            String timingXml = "<neoplasmTiming id='timing'><treeModel idref='treeModel'/>"
+                    + "<originHeight><parameter id='origin' value='5'/></originHeight>"
+                    + "<lcaFraction><parameter id='q' value='0.25'/></lcaFraction></neoplasmTiming>";
+            String xml = "<beast>" + (fractionMode ? timingXml : "")
+                    + modelXml("", ROOT, fractionMode ? "<neoplasmTiming idref='timing'/>" : HEIGHTS,
                     "<nu><parameter id='nu' value='0.07'/></nu>")
-                    + "<cenancestorTreeLikelihood id='likelihood' heightRules='" + heightRules + "'>"
+                    + "<cenancestorTreeLikelihood id='likelihood'" + (fractionMode ? "" : " heightRules='" + heightRules + "'") + ">"
                     + "<patterns idref='patterns'/><treeModel idref='treeModel'/><siteModel idref='siteModel'/>"
                     + "<branchRates idref='branchRates'/><errorModel idref='errorModel'/>"
                     + "<flipflopNeoplasmCenancestorFrequency idref='neoplasm'/>"
-                    + "<cenancestorHeight><parameter idref='height'/></cenancestorHeight>"
-                    + "<cenancestorBranch><parameter id='branch' value='1'/></cenancestorBranch>"
+                    + (fractionMode ? "" : "<cenancestorHeight><parameter idref='height'/></cenancestorHeight>"
+                    + "<cenancestorBranch><parameter id='branch' value='1'/></cenancestorBranch>")
                     + "</cenancestorTreeLikelihood></beast>";
             parser.parse(new StringReader(xml), false);
             CenancestorTreeLikelihood likelihood = (CenancestorTreeLikelihood) object(parser, "likelihood");
@@ -277,10 +312,10 @@ public class TestFlipFlopNeoplasmParser extends TestCase {
             // Only founder frequencies depend on nu here, testing listener propagation.
             Runnable[] proposals = {
                     () -> parameter(parser, "nu").setParameterValue(0, 0.3),
-                    () -> parameter(parser, heightRules ? "height" : "branch")
-                            .setParameterValue(0, heightRules ? 3 : 2),
+                    () -> parameter(parser, fractionMode ? "q" : heightRules ? "height" : "branch")
+                            .setParameterValue(0, fractionMode ? 0.6 : heightRules ? 3 : 2),
                     () -> tree.setNodeHeight(tree.getRoot(), 1.5),
-                    () -> parameter(parser, "origin").setParameterValue(0, 6),
+                    () -> parameter(parser, fractionMode ? "q" : "origin").setParameterValue(0, fractionMode ? 0.8 : 6),
                     () -> {
                         parameter(parser, "root").setParameterValue(0, 0.7);
                         parameter(parser, "root").setParameterValue(2, 0.3);
@@ -298,6 +333,25 @@ public class TestFlipFlopNeoplasmParser extends TestCase {
                 likelihood.makeDirty();
                 assertEquals(original, likelihood.getLogLikelihood(), 1e-12);
             }
+            if (fractionMode) {
+                dr.evomodel.tree.NeoplasmTimingModel timing = frequencies(parser).getTimingModel();
+                likelihood.storeModelState();
+                new dr.evomodel.operators.NeoplasmTreeScaleOperator(timing, 0.8, 1,
+                        dr.inference.operators.CoercionMode.COERCION_OFF).propose(1.1);
+                double scaled = likelihood.getLogLikelihood();
+                likelihood.makeDirty();
+                assertEquals(scaled, likelihood.getLogLikelihood(), 1e-12);
+                likelihood.restoreModelState();
+                likelihood.makeDirty();
+                assertEquals(original, likelihood.getLogLikelihood(), 1e-12);
+                likelihood.setUsed();
+                try {
+                    likelihood.getLogLikelihood();
+                    fail("Omitted timing prior must not silently change the target");
+                } catch (IllegalStateException expected) { }
+                timing.setUsed();
+                assertEquals(original, likelihood.getLogLikelihood(), 1e-12);
+            }
             // A defective founder generator must give a rejected proposal (-infinity),
             // not NaNs or an exception, and restoration must recover the likelihood.
             likelihood.storeModelState();
@@ -308,6 +362,21 @@ public class TestFlipFlopNeoplasmParser extends TestCase {
             assertEquals(original, likelihood.getLogLikelihood(), 1e-12);
             likelihood.makeDirty();
             assertEquals(original, likelihood.getLogLikelihood(), 1e-12);
+            likelihood.storeModelState();
+            if (fractionMode) tree.setNodeHeight(tree.getRoot(), 6);
+            else parameter(parser, heightRules ? "height" : "branch").setParameterValue(0, 6);
+            assertEquals(Double.NEGATIVE_INFINITY, likelihood.getLogLikelihood(), 0.0);
+            likelihood.restoreModelState();
+            likelihood.makeDirty();
+            assertEquals(original, likelihood.getLogLikelihood(), 1e-12);
+            if (!fractionMode && heightRules) {
+                likelihood.storeModelState();
+                tree.setNodeHeight(tree.getRoot(), 3); // Valid intree, but MRCA older than fixed C=2.
+                assertEquals(Double.NEGATIVE_INFINITY, likelihood.getLogLikelihood(), 0.0);
+                likelihood.restoreModelState();
+                likelihood.makeDirty();
+                assertEquals(original, likelihood.getLogLikelihood(), 1e-12);
+            }
         }
     }
 
