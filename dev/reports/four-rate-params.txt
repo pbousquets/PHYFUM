@@ -1,6 +1,7 @@
-PHYFUM four-rate model implementation
+PHYFUM four-rate model, XML generator, and converter
 Date: 2026-10-08
-Branch: four-rate-params_AI
+Updated: 2026-11-25
+Branch: dev
 
 Project orientation
 -------------------
@@ -56,8 +57,64 @@ To use independent rates, add these children inside the existing flipflopModel:
 
 Add operators, priors, and log entries for these parameter IDs as appropriate
 when estimating them. Supplying a parameter alone does not schedule proposals.
-Existing XML files and createXML.py output retain the original tied-rate model;
-the generator was not extended to emit independent rates in this change.
+
+Generating four-rate XML
+------------------------
+From PHYFUM:
+  python3 simulate/XMLgenerator/methylationBetas2xml.py \
+    --input samples.csv --age 45 --four-rates --output analysisFourRates
+
+The four rates are mu, nu, gamma, and zeta. The cell-replacement rate lambda
+remains independent. The generator uses the original tied rates by default.
+In four-rate mode, nu defaults to mu's initial value and zeta to gamma's
+initial value, with each defined as a separate parameter. Use --nu and --zeta
+to override their initial values. These options require --four-rates. The
+Python constructor accepts four_rates=True and optional nu and zeta values.
+
+The generator templates nu on mu and zeta on gamma. Both have nonnegative
+bounds, an independent scale operator with scaleFactor=0.9 and weight=0.5,
+and a half-normal prior with mean=0.0 and stdev=0.05. Both join the existing
+upDownOperator's rate group alongside mu, gamma and lambda, appear in the
+parameter log, and receive the same priors in MLE configurations.
+
+examples/release/flipflop/sim1AbsoluteFourRates.xml uses the same data and
+chain length as sim1Absolute.xml, with independent rates and its own
+sim1AbsoluteFourRates.ops/.log/.trees output names. The four-rate example
+also includes the reflected MRCA-height move documented in
+dev/reports/reflected-root-height.txt. In the XML generator that move is
+enabled separately with --mrca-sampling.
+
+Converting an existing XML
+--------------------------
+simulate/XMLgenerator/convert_to_four_rates.py uses only the Python 3.6+
+standard library. From PHYFUM:
+
+  python3 simulate/XMLgenerator/convert_to_four_rates.py analysis.xml
+  python3 simulate/XMLgenerator/convert_to_four_rates.py analysis.xml --suffix _four
+  python3 simulate/XMLgenerator/convert_to_four_rates.py analysis.xml chosen.xml --suffix _four
+
+The first command creates analysis_4param.xml, the second analysis_four.xml,
+and the third uses the exact output XML path chosen.xml. The suffix also
+goes before the final extension in fileName and operatorAnalysis attributes.
+Directories are preserved. This covers .ops, .log and .trees outputs, MLE
+logs, and corresponding analysis readers. For example, results/run.MLE.log
+becomes results/run.MLE_4param.log with the default suffix.
+
+The converter copies each source rate's initial value, bounds, actual scale
+operator and prior, including customized settings. It adds the new IDs to
+joint upDownOperator groups and existing rate logs, including log columns.
+It resolves source parameter idrefs, supports custom IDs, and assigns
+distinct IDs to cloned operators and priors. It preserves sequence content
+and XML comments inside the root. XML serialization can normalize quoting
+and empty-tag spacing. Comment preservation uses TreeBuilder callbacks to
+support Python versions before the insert_comments option added in 3.8.
+
+The input should have one defined flipflopModel with the generator's scalar
+rate parameter, scaleOperator and prior structure. The converter rejects
+already expanded XML, missing priors or operators, ID collisions, and
+nonpositive or nonfinite initial values for the scaled rates. It protects
+the input and existing output files from overwrite. Suffixes must be nonempty
+and cannot contain path separators.
 
 Validation
 ----------
@@ -76,15 +133,29 @@ Compilation passed. The new TestFlipFlopFourRates suite passed all five tests:
     by mu/gamma changes to check shared references and independent overrides.
   - Explicit XML idref sharing without duplicate model variables.
 
-The six correctly discovered suites passed 13 tests in total. The Ant target
-also attempted test.dr.evomodel.flipflop.TestSubstitutionModelEmpiricalFrequencies,
-which has a pre-existing package declaration of dr.evomodel.flipflop. This
-causes a ClassNotFoundException in that target even though Ant reports success.
-Ran this unchanged test separately using its declared package:
-  /Library/Java/JavaVirtualMachines/jdk-18.0.1.1.jdk/Contents/Home/bin/java -cp 'build:lib/*' org.junit.runner.JUnitCore dr.evomodel.flipflop.TestSubstitutionModelEmpiricalFrequencies
-It passed (one test), bringing the total to 14 passing tests. The unrelated
-package mismatch was left unchanged. No long inference chain was run.
+The Ant target initially missed the empirical-frequency test because its
+package declaration did not match the path-derived test name. Commit
+7bf5b2098 corrected the package. All seven suites then passed (14 tests),
+with zero failures or errors in the generated JUnit XML reports.
 
-Only the existing PHYFUM model/parser source files were modified; both had
-changes after commit 056fb40. Added the focused test class and this report.
-No reference-repository files were modified and no commits were pushed.
+Generator tests cover default tied rates, independent rate declarations and
+initial values, operators, priors, logs, CLI validation and reference
+integrity. At the time of the four-rate generator change, the default output
+was byte-for-byte identical to the previous version for the same inputs.
+The converter's six tests cover customized settings, XML references and
+unique IDs, alignment text and comments, output suffixes and MLE readers,
+default and explicit CLI paths, invalid inputs and overwrite protection:
+
+  PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover \
+    -s simulate/XMLgenerator -p test_convert_to_four_rates.py -v
+
+The compatibility tests ran with the installed Python. Python 3.6 and 3.7
+were unavailable for direct runtime verification.
+
+Three 150-step BeastMain smoke runs used -beagle_off -seed 12345: a generated
+four-rate XML from test.csv with nu=0.04 and zeta=0.08, a shortened copy of
+sim1AbsoluteFourRates.xml, and a converted copy of sim1Absolute.xml. All
+reached state 150 with finite posterior, prior and likelihood. Their
+operator reports included nu, zeta and the expanded joint rate/tree-time
+operator. The converted run also confirmed independent rate log columns
+and the _4param suffix on its .ops, .log and .trees outputs.
