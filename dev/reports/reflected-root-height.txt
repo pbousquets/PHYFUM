@@ -6,8 +6,14 @@ Base: four-rate-params_AI head, 7bf5b2098
 
 Implementation
 --------------
-Added a reflected root-height random walk to the XML generator's operator
-schedule, in both the original tied-rate and four-independent-rate modes.
+The XML generator can add a reflected root-height random walk in both the
+original tied-rate and four-independent-rate modes. The move is off by
+default. Enable it with --mrca-sampling on methylationBetas2xml.py or
+mrca_sampling=True in the createXML constructor.
+
+  python3 simulate/XMLgenerator/methylationBetas2xml.py --input samples.csv \
+    --age 45 --mrca-sampling --output analysis
+
 Added the same operator to examples/release/flipflop/sim1AbsoluteFourRates.xml.
 The original sim1Absolute.xml is unchanged.
 

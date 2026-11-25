@@ -12,10 +12,11 @@ class createXML:
     This class builds the actual XML file
     """
 
-    def __init__(self, age: float, stemCells: int = 3, delta: float = 0.2, eta: float = 0.7, kappa: float = 50, mu: float = 0.1, gamma: float = 0.1, Lambda: float = 1, popSize = 1, normalize=False, four_rates: bool = False, nu: float = None, zeta: float = None) -> None:
+    def __init__(self, age: float, stemCells: int = 3, delta: float = 0.2, eta: float = 0.7, kappa: float = 50, mu: float = 0.1, gamma: float = 0.1, Lambda: float = 1, popSize = 1, normalize=False, four_rates: bool = False, nu: float = None, zeta: float = None, mrca_sampling: bool = False) -> None:
         if not four_rates and (nu is not None or zeta is not None):
             raise ValueError("nu and zeta require four_rates=True")
         self.age = age
+        self.mrcaSampling = mrca_sampling
         self.lucaBranch = 1 if age > 1 else age * 0.1
         self.stemCells = stemCells
         self.delta = delta
@@ -197,12 +198,12 @@ class createXML:
                     self.doc.stag("parameter", idref="treeModel")
                 with self.tag("scaleOperator", scaleFactor="0.25", weight="3.0"):
                     self.doc.stag("parameter", idref="treeModel.rootHeight")
-                # The root parameter supplies the live oldest-child lower bound.
-                # Reflect at the fixed LCA age as well; never operate on luca_branch.
-                self.newSection("Reflected root-height move between the oldest child and the fixed LCA", addNewline=False)
-                with self.tag("randomWalkOperator", windowSize="2.5", weight="3.0",
-                              boundaryCondition="reflecting", upper=f"{self.age}", autoOptimize="true"):
-                    self.doc.stag("parameter", idref="treeModel.rootHeight")
+                if self.mrcaSampling:
+                    # The root parameter supplies the live oldest-child lower bound.
+                    self.newSection("Reflected root-height move between the oldest child and the fixed LCA", addNewline=False)
+                    with self.tag("randomWalkOperator", windowSize="2.5", weight="3.0",
+                                  boundaryCondition="reflecting", upper=f"{self.age}", autoOptimize="true"):
+                        self.doc.stag("parameter", idref="treeModel.rootHeight")
                 with self.tag("uniformOperator", weight="30.0"):
                     self.doc.stag("parameter", idref="treeModel.internalNodeHeights")
                 with self.tag("upDownOperator", scaleFactor="0.25", weight="3.0"):

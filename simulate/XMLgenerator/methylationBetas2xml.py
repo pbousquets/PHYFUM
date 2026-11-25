@@ -49,6 +49,7 @@ class CustomCommand(click.Command):
 @click.option("--nu", cls=CustomOption, default=None, type=click.FloatRange(min=0), help="Initial nu value for --four-rates; defaults to the initial mu value.", help_group="Substitution model")
 @click.option("--zeta", cls=CustomOption, default=None, type=click.FloatRange(min=0), help="Initial zeta value for --four-rates; defaults to the initial gamma value.", help_group="Substitution model")
 @click.option("--popSize", "popSize", cls=CustomOption, default=1, help="Prior for constant population size", type=float, help_group="Priors")
+@click.option("--mrca-sampling", cls=CustomOption, is_flag=True, default=False, help="Add a reflected MRCA-height proposal bounded by the fixed LCA.", help_group="Tree operators")
 @click.option("--mle", cls=CustomOption, default=False, help="Whether MLE estimation is used", is_flag=True, help_group="MLE estimation module")
 @click.option("--mle-steps", "mle_steps", cls=CustomOption, default=100, help="Number of power posteriors to use for MLE", type=click.INT, help_group="MLE estimation module")
 @click.option(
@@ -104,6 +105,7 @@ def main(
     four_rates: bool = False,
     nu: float = None,
     zeta: float = None,
+    mrca_sampling: bool = False,
 ) -> None:
     if not four_rates and (nu is not None or zeta is not None):
         raise click.UsageError("--nu and --zeta require --four-rates.")
@@ -117,7 +119,9 @@ def main(
         mle_iterations = ceil(iterations // mle_steps) if mle_iterations is None else mle_iterations
         mle_sampling = floor(mle_iterations // 1000) if mle_sampling is None else mle_sampling
 
-    XMLfile = createXML(age=age, stemCells=stemCells, delta=delta, eta=eta, kappa=kappa, mu=mu, gamma=gamma, Lambda=Lambda, popSize = popSize, four_rates=four_rates, nu=nu, zeta=zeta)
+    XMLfile = createXML(age=age, stemCells=stemCells, delta=delta, eta=eta, kappa=kappa,
+                        mu=mu, gamma=gamma, Lambda=Lambda, popSize=popSize,
+                        four_rates=four_rates, nu=nu, zeta=zeta, mrca_sampling=mrca_sampling)
     XMLfile.addSamples(myobj)
     XMLfile.buildDoc(output, iterations=iterations, sampling=sampling, screenSampling=screenSampling, mle=mle, mle_ss=mle_ss, mle_ps=mle_ps, hme=hme, mle_iterations=mle_iterations, mle_sampling=mle_sampling)
     XMLfile.printDocument(output)
