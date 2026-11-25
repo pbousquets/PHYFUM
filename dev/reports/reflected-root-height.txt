@@ -1,5 +1,6 @@
 Reflected MRCA-height proposal for the fixed-LCA model
 Date: 2026-10-09
+Updated: 2026-11-25
 Branch: reflected-root-height_AI
 Base: four-rate-params_AI head, 7bf5b2098
 
@@ -50,10 +51,53 @@ upper limit would not follow a sampled cenancestor height. If the fixed age
 is edited manually, update both luca_height and the operator's upper limit.
 The XML generator keeps them synchronized automatically.
 
+Adding the move to an existing XML
+----------------------------------
+simulate/XMLgenerator/add_mrca_sampling.py adds the reflected move to an
+existing fixed-LCA PHYFUM XML. It uses only the Python standard library and
+APIs available in Python 3.6.8.
+
+Run from PHYFUM:
+  python3 simulate/XMLgenerator/add_mrca_sampling.py analysis.xml
+  python3 simulate/XMLgenerator/add_mrca_sampling.py analysis.xml --suffix _trial
+  python3 simulate/XMLgenerator/add_mrca_sampling.py analysis.xml chosen.xml --suffix _trial
+
+The first command creates analysis_MRCASampling.xml next to the input. The
+suffix also goes before the final extension in fileName and operatorAnalysis
+attributes (e.g. run.log becomes run_MRCASampling.log and run.MLE.log becomes
+run.MLE_MRCASampling.log). Log writers and their MLE/HME analysis readers
+receive matching filenames. Directory components and the interpretation of
+relative paths are preserved. An explicit second positional path is used
+exactly as given, with the suffix still applied to names inside the XML.
+
+The script finds the likelihood's root parameter and reads its fixed
+cenancestorHeight, including through an idref. It uses the settings shown
+above and preserves the existing operators, rates, priors, data, and XML
+comments inside the document. XML formatting and quote style can change
+during serialization.
+
+The input must define one cenancestorTreeLikelihood with heightRules=true,
+one operator schedule, a positive finite scalar LCA height, and an identified
+root-height parameter. The script rejects a sampled LCA, an existing root
+randomWalkOperator, and an empty suffix or one containing path separators.
+It creates the output exclusively to protect the input and existing files.
+
+Other tree proposals
+--------------------
 The move does not add a global root bound to other operators; their existing
-stem prior still rejects roots older than the fixed LCA. No new demographic
-prior or other model changes were made. No ESS or ESS-per-second comparison
-was performed, and the short runs below do not establish convergence.
+stem prior still rejects roots older than the fixed LCA.
+
+Simulation study
+----------------
+In the user's simulation study, adding the reflected move did not change
+the observed accuracy of luca_branch estimates or overall accuracy. The
+effective sample size (ESS) of luca_branch improved with the new operator.
+The study found no statistically significant association between the ESS
+improvement and luca_branch length. The results therefore leave open whether
+the gain came from the reflected proposal itself or from proposing more
+updates to the MRCA height, which determines luca_branch. A comparison with
+matched total weight for root-height proposals would help distinguish these
+explanations.
 
 Regression coverage
 -------------------
@@ -107,4 +151,23 @@ The committed example retains its original chain length and log intervals.
 Temporary builds, XMLs, and smoke-run outputs:
   /private/tmp/phyfum-reflected-root.cqoWx3/
 
-git diff --check passed. Only PHYFUM was modified; nothing was pushed.
+Converter validation
+--------------------
+  PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover \
+    -s simulate/XMLgenerator -p test_add_mrca_sampling.py -v
+
+All five converter tests passed. They cover both rate-model examples,
+preservation of models, priors and existing operators, custom IDs, referenced
+LCA parameters, suffixes and analysis readers, CLI defaults and explicit
+paths, comments, overwrite protection, duplicate moves and invalid inputs.
+The six existing convert_to_four_rates.py tests also passed.
+
+The script passed a Python 3.6 grammar check using ast.parse with
+feature_version=(3,6). Tests ran under the installed Python 3 interpreter.
+Python 3.6.8 was unavailable for a runtime test.
+
+A converted copy of sim1AbsoluteFourRates.xml completed a 100-step BeastMain
+run with -beagle_off -seed 12345 and finite scores. The operator report
+confirmed that the reflected move was proposed and accepted. That run used
+the existing compiled build and a temporary XML with a shorter chain length.
+Temporary files were placed under /private/tmp/phyfum-add-mrca.2iLL0c/.
